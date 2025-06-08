@@ -1,0 +1,16 @@
+# ignore every node_modules folder in the tree
+node_modules/
+**/node_modules/
+
+# build outputs
+dist/
+dist-ssr/
+
+# environment files
+*.env
+*.local
+
+# IDE / OS files
+.vscode/
+.idea/
+.DS_Store

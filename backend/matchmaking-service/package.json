@@ -1,0 +1,15 @@
+{
+  "name": "bicycle-racing-matchmaking",
+  "version": "1.0.0",
+  "description": "Matchmaking service for realistic bicycle racing game",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "deploy": "zip -r matchmaking-function.zip . && aws lambda update-function-code --function-name bicycle-racing-matchmaking --zip-file fileb://matchmaking-function.zip"
+  },
+  "dependencies": {
+    "aws-lambda": "^1.0.7",
+    "cors": "^2.8.5",
+    "uuid": "^9.0.0"
+  }
+}
