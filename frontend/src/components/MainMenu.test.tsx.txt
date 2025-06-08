@@ -1,0 +1,12 @@
+import React from 'react';
+import { render, screen } from '@testing-library/react';
+import MainMenu from './MainMenu';
+import '@testing-library/jest-dom';
+
+describe('MainMenu Component', () => {
+  test('renders Start Race button', () => {
+    render(<MainMenu />);
+    const startRaceButton = screen.getByRole('button', { name: /start race/i });
+    expect(startRaceButton).toBeInTheDocument();
+  });
+});
