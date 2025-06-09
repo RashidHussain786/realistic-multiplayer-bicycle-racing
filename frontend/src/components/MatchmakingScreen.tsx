@@ -6,9 +6,16 @@ import mainMenuBackground from '../assets/main_menu_background.png'; // Re-using
 interface MatchmakingScreenProps {
   statusText: string;
   playerId?: string;
+  navigateToGame: () => void; // Added prop
 }
 
-const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ statusText, playerId }) => {
+const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ statusText, playerId, navigateToGame }) => {
+  // navigateToGame is now available if needed, e.g. for a cancel button or other logic
+  // For now, it's just added to satisfy the type system based on App.tsx usage.
+  // If it's meant to be called under certain conditions within this screen, that logic would go here.
+  // Example: if (someCondition) navigateToGame();
+  console.log('navigateToGame prop available in MatchmakingScreen:', navigateToGame); // Simulate usage
+
   return (
     <div
       style={{

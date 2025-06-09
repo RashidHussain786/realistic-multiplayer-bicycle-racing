@@ -8,7 +8,7 @@ describe('MatchmakingScreen Component', () => {
   const playerId = "testPlayer123";
 
   test('renders with status text and player ID', () => {
-    render(<MatchmakingScreen statusText={statusText} playerId={playerId} />);
+    render(<MatchmakingScreen statusText={statusText} playerId={playerId} navigateToGame={() => {}} />);
 
     // Check for status text
     expect(screen.getByText(statusText)).toBeInTheDocument();
@@ -23,7 +23,7 @@ describe('MatchmakingScreen Component', () => {
   });
 
   test('renders with status text and without player ID', () => {
-    render(<MatchmakingScreen statusText={statusText} />);
+    render(<MatchmakingScreen statusText={statusText} navigateToGame={() => {}} />);
 
     // Check for status text
     expect(screen.getByText(statusText)).toBeInTheDocument();
@@ -38,7 +38,7 @@ describe('MatchmakingScreen Component', () => {
   test('applies basic styling (presence of font family in style attribute - indicative)', () => {
     // Note: Testing exact CSS is brittle. This is a very basic check.
     // More robust visual testing would require tools like Storybook or Percy.
-    const { container } = render(<MatchmakingScreen statusText={statusText} />);
+    const { container } = render(<MatchmakingScreen statusText={statusText} navigateToGame={() => {}} />);
     const mainDiv = container.firstChild as HTMLElement;
 
     // Check if the main div has a style attribute that suggests retro font might be applied

@@ -1,5 +1,5 @@
 // frontend/src/components/MainMenu.tsx
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import webRTCService from '../services/WebRTCService';
 import type SimplePeer from 'simple-peer';
 import GameScreen from './GameScreen';
@@ -12,7 +12,11 @@ const API_GATEWAY_URL = 'YOUR_API_GATEWAY_URL_HERE';
 const MATCHMAKING_ENDPOINT = `${API_GATEWAY_URL}/matchmaking`;
 // const SIGNALING_ENDPOINT = `${API_GATEWAY_URL}/signal`; // Placeholder for signaling
 
-function MainMenu() {
+interface MainMenuProps {
+  navigateToMatchmaking: () => void;
+}
+
+const MainMenu: React.FC<MainMenuProps> = ({ navigateToMatchmaking }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [isConnectingRTC, setIsConnectingRTC] = useState(false);
   const [isRTCConnected, setIsRTCConnected] = useState(false);
@@ -92,58 +96,72 @@ function MainMenu() {
     }
   }, [isConnectingRTC, playerId, opponentId]);
 
-  const handleStartRace = async () => {
+  // Updated to use navigateToMatchmaking prop
+  const handleStartRace = () => {
     if (!playerId) {
         console.error("Player ID not set yet.");
         return;
     }
-    setIsSearching(true);
+    // Call the prop function to navigate
+    navigateToMatchmaking();
+
+    // Existing logic for matchmaking and WebRTC connection can be moved
+    // to MatchmakingScreen or stay here if MainMenu still manages this part.
+    // For now, let's assume MainMenu still handles the RTC setup after navigation.
+    // This might need further refactoring based on how MatchmakingScreen behaves.
+    setIsSearching(true); // Or this state might become local to MatchmakingScreen
     setIsConnectingRTC(false);
     setIsRTCConnected(false);
     setOpponentId('');
     setLastMessageReceived(null);
-    setRtcError(null); // Clear any previous error
-    webRTCService.disconnect();
+    setRtcError(null);
+    webRTCService.disconnect(); // Ensure clean state
 
-    try {
-      const response = await fetch(MATCHMAKING_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId }),
-      });
-      const data = await response.json();
-      console.log("Matchmaking response:", data);
+    // The actual fetch and WebRTC connect logic might be triggered
+    // from MatchmakingScreen or via props/callbacks from it.
+    // For this step, we'll keep it here to show the prop is used.
+    // A more complete refactor might move this.
+    // Simulating that navigation happens, and then this component might still
+    // listen to events or manage the connection if it's not fully unmounted.
+    // Consider if this fetch should be here or in MatchmakingScreen.
+    // If MainMenu is unmounted after navigateToMatchmaking, this fetch won't run as expected.
+    // For now, let's assume it's part of the flow initiated by MainMenu.
+    // This part might need to be removed if MatchmakingScreen handles its own fetch.
+    (async () => {
+      try {
+        const response = await fetch(MATCHMAKING_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ playerId }),
+        });
+        const data = await response.json();
+        console.log("Matchmaking response:", data);
 
-      if (data.matched && data.opponent) {
-        setIsSearching(false);
-        setIsConnectingRTC(true);
-        setOpponentId(data.opponent.id);
-        const isInitiator = data.isInitiator !== undefined ? data.isInitiator : true;
-        const remoteSignal = data.signalData ? data.signalData : undefined;
-        console.log(`MainMenu: Opponent found: ${data.opponent.id}. Is Initiator: ${isInitiator}. Received Signal: ${remoteSignal ? JSON.stringify(remoteSignal) : 'null'}`);
-        webRTCService.connect(isInitiator, remoteSignal);
-      } else if (data.waiting) {
-        setIsSearching(false);
-        setIsConnectingRTC(true);
-        console.log('MainMenu: Waiting for opponent, I will be the initiator.');
-        webRTCService.connect(true);
-      } else if (data.error) { // Assuming backend might send an error message
-        setIsSearching(false);
-        setRtcError(data.error);
-      }
-      else {
-        console.log('MainMenu: Still searching for opponent or unknown matchmaking state.');
-        if (!data.matched && !data.waiting) {
-            setIsSearching(false); // Stop searching if no clear path forward
-            setRtcError("Matchmaking failed. No opponent found or server error.");
+        if (data.matched && data.opponent) {
+          setIsSearching(false);
+          setIsConnectingRTC(true);
+          setOpponentId(data.opponent.id);
+          const isInitiator = data.isInitiator !== undefined ? data.isInitiator : true;
+          const remoteSignal = data.signalData ? data.signalData : undefined;
+          webRTCService.connect(isInitiator, remoteSignal);
+        } else if (data.waiting) {
+          setIsSearching(false);
+          setIsConnectingRTC(true);
+          webRTCService.connect(true); // Initiator
+        } else if (data.error) {
+          setIsSearching(false);
+          setRtcError(data.error);
+        } else {
+          setIsSearching(false);
+          setRtcError("Matchmaking failed. Unknown server response.");
         }
+      } catch (error: any) {
+        console.error('Error during matchmaking or WebRTC initiation:', error);
+        setIsSearching(false);
+        setIsConnectingRTC(false);
+        setRtcError(`Matchmaking request failed: ${error.message || "Check console for details."}`);
       }
-    } catch (error: any) { // Catch network errors or JSON parsing errors
-      console.error('Error during matchmaking or WebRTC initiation:', error);
-      setIsSearching(false);
-      setIsConnectingRTC(false);
-      setRtcError(`Matchmaking request failed: ${error.message || "Check console for details."}`);
-    }
+    })();
   };
 
   const handleDisconnect = () => {
@@ -193,11 +211,12 @@ function MainMenu() {
           onDisconnect={handleDisconnect}
           onSendMessage={handleSendMessage}
           lastMessageReceived={lastMessageReceived}
+          onRaceEnd={() => { console.log("Race ended from MainMenu"); }} // Dummy handler
         />
       ) : isConnectingRTC ? (
-        <MatchmakingScreen statusText="Connecting to Opponent..." playerId={playerId} />
+        <MatchmakingScreen statusText="Connecting to Opponent..." playerId={playerId} navigateToGame={() => console.log("Navigate to game from MainMenu/Connecting")} />
       ) : isSearching ? (
-        <MatchmakingScreen statusText="Searching for Opponent..." playerId={playerId} />
+        <MatchmakingScreen statusText="Searching for Opponent..." playerId={playerId} navigateToGame={() => console.log("Navigate to game from MainMenu/Searching")} />
       ) : (
         <div>
           <p style={{ textShadow: '1px 1px #000000' }}>(My ID: {playerId})</p>

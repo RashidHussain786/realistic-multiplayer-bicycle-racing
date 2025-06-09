@@ -26,7 +26,7 @@ function App() {
       content = <MainMenu navigateToMatchmaking={navigateToMatchmaking} />;
       break;
     case AppScreen.Matchmaking:
-      content = <MatchmakingScreen navigateToGame={navigateToGame} />;
+      content = <MatchmakingScreen statusText="Searching for opponent..." navigateToGame={navigateToGame} />;
       break;
     case AppScreen.InGame:
       // opponentId, playerId, onDisconnect, onSendMessage, lastMessageReceived are illustrative;
