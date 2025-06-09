@@ -1,3 +1,8 @@
+import skyBackground from '../assets/sky_background.png';
+import mountainLayer1 from '../assets/mountain_layer_1.png';
+import mountainLayer2 from '../assets/mountain_layer_2.png';
+import mountainLayer3 from '../assets/mountain_layer_3.png';
+import { useState, useEffect, useRef } from 'react'; // Ensure useState, useEffect, useRef are imported
 // frontend/src/components/GameScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import { Engine, Render, Runner, World, Bodies, Composite, Constraint, Body, Events } from 'matter-js';
@@ -77,6 +82,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
   lastMessageReceived,
 }) => {
   const [message, setMessage] = useState('');
+  const [score, setScore] = useState(0); // Basic score state
+  // TODO: Add logic to update score based on game events
   const sceneRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const runnerRef = useRef<Runner | null>(null);
@@ -117,7 +124,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         width: 800,
         height: 600,
         wireframes: false, // Set to true for debugging
-        background: '#f0f0f0',
+        background: 'transparent', // Parallax background
       },
     });
 
@@ -142,7 +149,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     const trackCenterX = canvasWidth / 2;
     const trackCenterY = canvasHeight / 2;
 
-    const trackWallStyle = { isStatic: true, label: 'trackWall', render: { fillStyle: '#666' } };
+    const trackWallStyle = { isStatic: true, label: 'trackWall', render: { fillStyle: '#3333FF' } }; // Vibrant Blue
 
     const wallBodies = [];
 
@@ -238,67 +245,48 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
     // Hazard Properties
     const potholeRadius = 18;
-    const potholeStyle = { isStatic: true, isSensor: true, label: 'pothole', render: { fillStyle: '#8B4513' } };
-    const oilSlickWidth = 30; // Adjusted to be width when rotated to be across track path
-    const oilSlickHeight = 80; // Adjusted to be length along track path
-    const oilSlickStyle = { isStatic: true, isSensor: true, label: 'oilSlick', render: { fillStyle: '#4A4A4A' } };
+    const potholeStyle = { isStatic: true, isSensor: true, label: 'pothole', render: { fillStyle: '#FF6600' } }; // Bright Orange
+    const oilSlickWidth = 30;
+    const oilSlickHeight = 80;
+    const oilSlickStyle = { isStatic: true, isSensor: true, label: 'oilSlick', render: { fillStyle: '#6600CC' } }; // Purple
+
 
     // Hazard Placement Calculations
-    // Pothole 1 (Top straight, slightly right)
     const p1x = trackCenterX + 50;
     const p1y = trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4);
-
-    // Pothole 2 (Bottom straight, slightly left)
     const p2x = trackCenterX - 50;
     const p2y = trackCenterY + (trackInnerHeight / 2) + ((trackOuterHeight - trackInnerHeight) / 4);
-
-    // Oil Slick 1 (Left side, on the straight part of the track width)
     const o1x = trackCenterX - (trackInnerWidth / 2) - ((trackOuterWidth - trackInnerWidth) / 4);
-    const o1y = trackCenterY - 50; // Adjusted to be on the track, may need further fine-tuning
-
-    // Oil Slick 2 (Right side, on the straight part of the track width)
+    const o1y = trackCenterY - 50;
     const o2x = trackCenterX + (trackInnerWidth / 2) + ((trackOuterWidth - trackInnerWidth) / 4);
-    const o2y = trackCenterY + 50; // Adjusted to be on the track, may need further fine-tuning
+    const o2y = trackCenterY + 50;
 
     // Create Hazard Bodies
     const pothole1 = Bodies.circle(p1x, p1y, potholeRadius, potholeStyle);
     const pothole2 = Bodies.circle(p2x, p2y, potholeRadius, potholeStyle);
-    // For oil slicks, the 'width' becomes height and 'height' becomes width due to rotation.
-    // Or, define width as across track and height as along track, then rotate.
-    // Let's define width: 80 (along track), height: 30 (across track), then rotate.
-    // The task description implies width 80, height 30. If rotated PI/2, width becomes vertical.
-    // So, width = 30 (across track), height = 80 (along track) if not rotating.
-    // Or, width = 80 (original width), height = 30 (original height), angle = PI/2
     const oilSlick1 = Bodies.rectangle(o1x, o1y, 80, 30, { ...oilSlickStyle, angle: Math.PI / 2 });
-    const oilSlick2 = Bodies.rectangle(o2x, o2y, 80, 30, { ...oilSlickStyle, angle: Math.PI / 2 }); // Or -Math.PI/2, effect is same for 180deg symmetry
+    const oilSlick2 = Bodies.rectangle(o2x, o2y, 80, 30, { ...oilSlickStyle, angle: Math.PI / 2 });
 
     World.add(world, [pothole1, pothole2, oilSlick1, oilSlick2]);
 
-    // Create and add the player's bicycle
-    // Adjusted Y position: (canvasHeight - trackOuterHeight / 2) - 50 (on top straight part, above its centerline)
-    // = (600 - 450/2) - 50 = (600 - 225) - 50 = 375 - 50 = 325
     const playerStartX = trackCenterX;
-    const playerStartY = trackCenterY - trackOuterHeight / 2 + wallThickness + 50; // Position on the top straight track
+    const playerStartY = trackCenterY - trackOuterHeight / 2 + wallThickness + 50;
     const playerBicycleInstance = createBicycle(playerStartX, playerStartY);
     bicycleRef.current = playerBicycleInstance;
     World.add(world, playerBicycleInstance);
 
-    // Create and add the opponent's bicycle
-    // Place opponent on a different part of the track, e.g., bottom straight
     const opponentStartX = trackCenterX;
-    const opponentStartY = trackCenterY + trackOuterHeight / 2 - wallThickness - 50; // Position on the bottom straight track
+    const opponentStartY = trackCenterY + trackOuterHeight / 2 - wallThickness - 50;
     const opponentBicycleInstance = createBicycle(opponentStartX, opponentStartY);
     opponentBicycleRef.current = opponentBicycleInstance;
-    // Optionally, change color or properties for visual distinction
     opponentBicycleInstance.bodies.forEach(b => {
       if (b.label === 'frame' || b.label === 'wheelA' || b.label === 'wheelB') {
-        b.render.fillStyle = 'rgba(0, 0, 255, 0.7)'; // Example: Make opponent's bike semi-transparent blue
-        b.render.strokeStyle = 'darkblue';
+        b.render.fillStyle = '#00FFFF'; // Cyan for opponent bike
+        b.render.strokeStyle = '#00AAAA'; // Darker cyan for opponent outline
       }
     });
     World.add(world, opponentBicycleInstance);
 
-    // Set opponent's bicycle parts to be sensors
     const opponentFrameBody = Composite.get(opponentBicycleInstance, 'frame', 'body') as Body | null;
     const opponentWheelABody = Composite.get(opponentBicycleInstance, 'wheelA', 'body') as Body | null;
     const opponentWheelBBody = Composite.get(opponentBicycleInstance, 'wheelB', 'body') as Body | null;
@@ -308,25 +296,19 @@ const GameScreen: React.FC<GameScreenProps> = ({
     if (opponentWheelBBody) Body.set(opponentWheelBBody, { isSensor: true });
 
 
-    // Run the engine
     Runner.run(runner, engine);
     Render.run(render);
 
-    // --- Collision Detection with Hazards ---
     const handleCollision = (event: Matter.IEventCollision<Engine>) => {
       if (!bicycleRef.current) return;
-
       const playerParts = Composite.allBodies(bicycleRef.current);
       const pairs = event.pairs;
-
       for (let i = 0; i < pairs.length; i++) {
         const pair = pairs[i];
         let playerBody = null;
         let hazardBody = null;
-
         const isBodyAPlayerPart = playerParts.some(part => part.id === pair.bodyA.id);
         const isBodyBPlayerPart = playerParts.some(part => part.id === pair.bodyB.id);
-
         if (isBodyAPlayerPart && (pair.bodyB.label === 'pothole' || pair.bodyB.label === 'oilSlick')) {
           playerBody = pair.bodyA;
           hazardBody = pair.bodyB;
@@ -334,25 +316,20 @@ const GameScreen: React.FC<GameScreenProps> = ({
           playerBody = pair.bodyB;
           hazardBody = pair.bodyA;
         }
-
         if (playerBody && hazardBody) {
-          // console.log(`Player collided with: ${hazardBody.label}`); // Original log
-
           if (hazardBody.label === 'pothole') {
             const now = Date.now();
-            const POTHOLE_COOLDOWN = 1000; // 1 second cooldown
+            const POTHOLE_COOLDOWN = 1000;
             if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
               console.log('Applying pothole effect...');
               lastPotholeCollisionTimeRef.current = now;
-
-              const playerBicycleParts = Composite.allBodies(bicycleRef.current!); // bicycleRef.current is checked at the start of handleCollision
+              const playerBicycleParts = Composite.allBodies(bicycleRef.current!);
               playerBicycleParts.forEach(part => {
                 Body.setVelocity(part, {
-                  x: part.velocity.x * 0.5, // Reduce horizontal speed by 50%
-                  y: part.velocity.y * 0.5  // Reduce vertical speed by 50%
+                  x: part.velocity.x * 0.5,
+                  y: part.velocity.y * 0.5
                 });
               });
-
               const rearWheel = Composite.get(bicycleRef.current!, 'wheelB', 'body') as Body | null;
               const frontWheel = Composite.get(bicycleRef.current!, 'wheelA', 'body') as Body | null;
               if (rearWheel) Body.setAngularVelocity(rearWheel, rearWheel.angularVelocity * 0.5);
@@ -360,20 +337,13 @@ const GameScreen: React.FC<GameScreenProps> = ({
             }
           } else if (hazardBody.label === 'oilSlick') {
             const now = Date.now();
-            const OIL_SLICK_COOLDOWN = 1500; // 1.5 seconds cooldown
+            const OIL_SLICK_COOLDOWN = 1500;
             if (now - lastOilSlickCollisionTimeRef.current > OIL_SLICK_COOLDOWN) {
               console.log('Applying oil slick effect...');
               lastOilSlickCollisionTimeRef.current = now;
-
               const playerFrame = Composite.get(bicycleRef.current!, 'frame', 'body') as Body | null;
-              // The frame density is 0.005. A force of 0.05 would be huge.
-              // Let's try a force relative to its likely mass.
-              // If frame is 100x30 area, volume (if thickness 1) is 3000. Mass ~ 3000 * 0.005 = 15.
-              // A force of 0.05 / 15 is an acceleration of ~0.0033 m/s^2 (if units are SI like)
-              // Let's use a smaller force magnitude, e.g., 0.0025, if this is too small it can be tuned.
               const forceMagnitude = 0.0025;
-              const direction = Math.random() < 0.5 ? -1 : 1; // Randomly swerve left or right
-
+              const direction = Math.random() < 0.5 ? -1 : 1;
               if (playerFrame) {
                 Body.applyForce(playerFrame, playerFrame.position, { x: forceMagnitude * direction, y: 0 });
               }
@@ -382,19 +352,14 @@ const GameScreen: React.FC<GameScreenProps> = ({
         }
       }
     };
-
     Events.on(engine, 'collisionStart', handleCollision);
 
-    const RENDER_DELAY = 100; // ms, for interpolation
-
-    // --- Main game loop listener (beforeUpdate) ---
-    const gameLoop = () => { // Renamed from gameLoop to avoid conflict if any, though it's local
-      // Player's bicycle force application (existing logic)
+    const RENDER_DELAY = 100;
+    const gameLoop = () => {
       const targetForce = targetForceRef.current;
       const currentAppliedForce = currentAppliedForceRef.current;
       const newAppliedForce = currentAppliedForce + (targetForce - currentAppliedForce) * FORCE_SMOOTHING_FACTOR;
       currentAppliedForceRef.current = newAppliedForce;
-
       if (bicycleRef.current && Math.abs(newAppliedForce) > MIN_APPLIED_FORCE_THRESHOLD) {
         const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
         if (rearWheel) {
@@ -405,19 +370,11 @@ const GameScreen: React.FC<GameScreenProps> = ({
       if (Math.abs(targetForceRef.current) < MIN_APPLIED_FORCE_THRESHOLD) {
         targetForceRef.current = 0;
       }
-
-      // Opponent's bicycle interpolation logic
       if (opponentBicycleRef.current && engineRef.current) {
         const buffer = opponentStateBufferRef.current;
-        const renderTimestamp = performance.now(); // Using performance.now() for consistency with receivedTime
-
-        if (buffer.length === 0 && opponentVisualStateRef.current) {
-          // If buffer is empty but we had a visual state, keep rendering that (no new updates)
-          // This case might be redundant if visual state is only set when buffer has items.
-        } else if (buffer.length > 0) {
+        const renderTimestamp = performance.now();
+        if (buffer.length > 0) {
           let s1 = null, s2 = null;
-
-          // Find two states to interpolate between based on RENDER_DELAY
           const targetTime = renderTimestamp - RENDER_DELAY;
           for (let i = buffer.length - 1; i >= 0; i--) {
             if (buffer[i].state.timestamp <= targetTime) {
@@ -428,43 +385,34 @@ const GameScreen: React.FC<GameScreenProps> = ({
               break;
             }
           }
-          // If no state is old enough, s1 will be null. We might need to extrapolate backwards or use the oldest state.
-          // If all states are older than targetTime (s1 is the latest, s2 is null), we extrapolate forwards.
-
-          if (s1 && s2) { // Interpolate
+          if (s1 && s2) {
             const t1 = s1.state.timestamp;
             const t2 = s2.state.timestamp;
             let factor = 0;
-            if (t2 - t1 > 0) { // Avoid division by zero
+            if (t2 - t1 > 0) {
                 factor = (targetTime - t1) / (t2 - t1);
             }
-            factor = Math.max(0, Math.min(1, factor)); // Clamp factor
-
+            factor = Math.max(0, Math.min(1, factor));
             const prevPos = s1.state.position;
             const nextPos = s2.state.position;
             const interpolatedX = prevPos.x + (nextPos.x - prevPos.x) * factor;
             const interpolatedY = prevPos.y + (nextPos.y - prevPos.y) * factor;
-
             const prevAngle = s1.state.angle;
             const nextAngle = s2.state.angle;
-            // Simple linear interpolation for angle. Consider shortest path for angles if differences can be large.
             const interpolatedAngle = prevAngle + (nextAngle - prevAngle) * factor;
-
             opponentVisualStateRef.current = {
               position: { x: interpolatedX, y: interpolatedY },
               angle: interpolatedAngle,
-              wheelSpeed: s2.state.wheelSpeed, // Use latest wheel speed
+              wheelSpeed: s2.state.wheelSpeed,
             };
-          } else if (s1) { // Extrapolate from s1 (if s2 is null, means s1 is the newest state older than targetTime)
-                           // Or, if all states are newer than targetTime, s1 is null.
-                           // For now, if only one state or cannot find pair, just use the latest.
+          } else if (s1) {
             const latestStateEntry = buffer[buffer.length - 1];
             opponentVisualStateRef.current = {
               position: { ...latestStateEntry.state.position },
               angle: latestStateEntry.state.angle,
               wheelSpeed: latestStateEntry.state.wheelSpeed,
             };
-          } else if (buffer.length > 0) { // Fallback: use the most recent state if no suitable pair found
+          } else if (buffer.length > 0) {
             const latestStateEntry = buffer[buffer.length - 1];
             opponentVisualStateRef.current = {
               position: { ...latestStateEntry.state.position },
@@ -473,8 +421,6 @@ const GameScreen: React.FC<GameScreenProps> = ({
             };
           }
         }
-
-        // Apply visual state to Matter.js bodies
         if (opponentVisualStateRef.current && opponentBicycleRef.current) {
           const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
           const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
@@ -486,75 +432,54 @@ const GameScreen: React.FC<GameScreenProps> = ({
         }
       }
     };
-    Events.on(engine, 'beforeUpdate', gameLoop); // Use beforeUpdate for physics related changes
-
-
-    // --- afterUpdate event listener for sending game state (player's state) ---
-    const handlePlayerStateSend = () => { // Renamed from handlePlayerStateSend to avoid conflict if any
+    Events.on(engine, 'beforeUpdate', gameLoop);
+    const handlePlayerStateSend = () => {
       if (bicycleRef.current && engineRef.current) {
         const frame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
         const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
-
         if (frame && rearWheel) {
           const gameState: GameState = {
             position: { x: frame.position.x, y: frame.position.y },
             angle: frame.angle,
             wheelSpeed: rearWheel.angularVelocity,
-            timestamp: performance.now(), // Use performance.now() for player state as well
+            timestamp: performance.now(),
           };
           webRTCService.sendGameState(gameState);
         }
       }
     };
-    Events.on(engine, 'afterUpdate', handlePlayerStateSend); // Send state after physics update
-
-    // Cleanup on unmount
+    Events.on(engine, 'afterUpdate', handlePlayerStateSend);
     return () => {
-      Events.off(engine, 'collisionStart', handleCollision); // Cleanup collision listener
+      Events.off(engine, 'collisionStart', handleCollision);
       Events.off(engine, 'beforeUpdate', gameLoop);
       Events.off(engine, 'afterUpdate', handlePlayerStateSend);
-
       if (runnerRef.current) {
         Runner.stop(runnerRef.current);
       }
       if (engineRef.current) {
-        Composite.clear(engineRef.current.world, false, true); // Clear bodies, constraints, composites
-        Engine.clear(engineRef.current); // Clear the engine itself
+        Composite.clear(engineRef.current.world, false, true);
+        Engine.clear(engineRef.current);
       }
-      Render.stop(render); // Stop the renderer
+      Render.stop(render);
       if (render.canvas) {
-        render.canvas.remove(); // Remove the canvas element
+        render.canvas.remove();
       }
-      // Ensure runner and engine are nullified if needed, though refs will persist
-      // runnerRef.current = null;
-      // engineRef.current = null;
     };
-  }, []); // Empty dependency array ensures this runs only once on mount and cleanup on unmount
-  // Note: bicycleRef, opponentBicycleRef and engineRef are refs, their .current property changes do not trigger re-runs of useEffect.
-  // If these refs themselves were to change (which they don't in this setup), they'd be needed in dependencies.
-
-  // Effect for setting up game state receiver
+  }, []);
   useEffect(() => {
-    const BUFFER_SIZE_LIMIT = 20; // Keep last 20 states
-
+    const BUFFER_SIZE_LIMIT = 20;
     webRTCService.setOnGameStateReceived((gameState: GameState) => {
-      const receivedTime = performance.now(); // Use performance.now() for consistency
+      const receivedTime = performance.now();
       opponentStateBufferRef.current.push({ state: gameState, receivedTime });
-
-      // Manage buffer size
       if (opponentStateBufferRef.current.length > BUFFER_SIZE_LIMIT) {
-        opponentStateBufferRef.current.shift(); // Remove the oldest state
+        opponentStateBufferRef.current.shift();
       }
-
-      // If this is the first state, or opponentVisualState is not yet set,
-      // initialize visual state and apply directly to Matter bodies.
       if (!opponentVisualStateRef.current && opponentBicycleRef.current) {
         opponentVisualStateRef.current = {
           position: { ...gameState.position },
           angle: gameState.angle,
           wheelSpeed: gameState.wheelSpeed,
         };
-
         const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
         const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
         if (opponentFrame && opponentRearWheel) {
@@ -564,40 +489,32 @@ const GameScreen: React.FC<GameScreenProps> = ({
         }
       }
     });
-
     return () => {
-      webRTCService.setOnGameStateReceived(null); // Clear callback on unmount
+      webRTCService.setOnGameStateReceived(null);
     };
-  }, []); // Empty dependency array, runs once on mount
-
-  // Effect for keyboard input
+  }, []);
   useEffect(() => {
-    const MAX_EFFECTIVE_TIME_DIFF = 500; // ms
-    const FORCE_SCALE_FACTOR = 0.03; // Adjust for desired force strength
-    const LOW_SPEED_THRESHOLD = 0.5; // m/s, approximate
-    const MIN_FORCE_RAMP_FACTOR = 0.1; // Minimum force factor when starting from stop
-
+    const MAX_EFFECTIVE_TIME_DIFF = 500;
+    const FORCE_SCALE_FACTOR = 0.03;
+    const LOW_SPEED_THRESHOLD = 0.5;
+    const MIN_FORCE_RAMP_FACTOR = 0.1;
     const applyPedalForce = (key: 'a' | 'd') => {
       if (!bicycleRef.current) return;
-
       const currentTime = Date.now();
       const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
-
       if (!rearWheel) {
         console.error('Rear wheel (wheelB) not found in composite');
         return;
       }
-
       let timeDiff = 0;
       let calculatedForceMagnitude = 0;
-
       if (key === 'a') {
         const lastDTime = lastDPressTimeRef.current;
         if (lastDTime > 0) {
           timeDiff = currentTime - lastDTime;
           if (timeDiff > 0 && timeDiff < MAX_EFFECTIVE_TIME_DIFF) {
             calculatedForceMagnitude = FORCE_SCALE_FACTOR * (1 - timeDiff / MAX_EFFECTIVE_TIME_DIFF);
-            lastDPressTimeRef.current = 0; // Reset for next alternation
+            lastDPressTimeRef.current = 0;
           }
         }
         lastAPressTimeRef.current = currentTime;
@@ -607,40 +524,25 @@ const GameScreen: React.FC<GameScreenProps> = ({
           timeDiff = currentTime - lastATime;
           if (timeDiff > 0 && timeDiff < MAX_EFFECTIVE_TIME_DIFF) {
             calculatedForceMagnitude = FORCE_SCALE_FACTOR * (1 - timeDiff / MAX_EFFECTIVE_TIME_DIFF);
-            lastAPressTimeRef.current = 0; // Reset for next alternation
+            lastAPressTimeRef.current = 0;
           }
         }
         lastDPressTimeRef.current = currentTime;
       }
-
       if (calculatedForceMagnitude > 0) {
         const currentSpeed = Math.abs(rearWheel.velocity.x);
         let rampUpFactor = 1.0;
-
         if (currentSpeed < LOW_SPEED_THRESHOLD) {
           rampUpFactor = Math.min(1, (currentSpeed / LOW_SPEED_THRESHOLD) + MIN_FORCE_RAMP_FACTOR);
-          // Ensure rampUpFactor is not less than MIN_FORCE_RAMP_FACTOR, especially at speed 0
           rampUpFactor = Math.max(MIN_FORCE_RAMP_FACTOR, rampUpFactor);
         }
-
         const finalForceMagnitude = calculatedForceMagnitude * rampUpFactor;
-
-        targetForceRef.current = finalForceMagnitude; // Set the target force
-
+        targetForceRef.current = finalForceMagnitude;
         console.log(
           `Target force set: ${finalForceMagnitude.toFixed(4)} (Base: ${calculatedForceMagnitude.toFixed(4)}, Ramp: ${rampUpFactor.toFixed(2)}) due to ${key.toUpperCase()} press (timeDiff: ${timeDiff}ms, speed: ${currentSpeed.toFixed(2)})`
         );
-        // Body.applyForce(rearWheel, rearWheel.position, { x: finalForceMagnitude, y: 0 }); // REMOVED
-      } else if (calculatedForceMagnitude <= 0 && (key === 'a' || key === 'd')) {
-        // If pedal stroke was not effective (e.g., too slow alternation) but key was pressed,
-        // we still want to ensure previous target force starts decaying if it wasn't already.
-        // The main decay logic in beforeUpdate handles continuous decay.
-        // This ensures that if a player *tries* to pedal but fails, targetForce doesn't stick.
-        // However, the primary decay is handled in beforeUpdate. This might be redundant.
-        // For now, the main decay in beforeUpdate should be sufficient.
       }
     };
-
     const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
       if (key === 'a') {
@@ -649,15 +551,20 @@ const GameScreen: React.FC<GameScreenProps> = ({
         applyPedalForce('d');
       }
     };
-
     window.addEventListener('keydown', handleKeyDown);
-
-    // Cleanup event listener on unmount
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, []); // Empty dependency array to run once on mount and clean up on unmount
 
+  // Effect for time-based score increment
+  useEffect(() => {
+    const scoreInterval = setInterval(() => {
+      setScore(prevScore => prevScore + 10); // Increment score by 10 every 5 seconds
+    }, 5000); // 5000 milliseconds = 5 seconds
+
+    return () => clearInterval(scoreInterval); // Cleanup interval on component unmount
+  }, []); // Empty dependency array ensures this runs once on mount
 
   const handleSend = () => {
     if (message.trim()) {
@@ -666,14 +573,60 @@ const GameScreen: React.FC<GameScreenProps> = ({
     }
   };
 
+  const [skyOffset, setSkyOffset] = useState(0);
+  const [mountain1Offset, setMountain1Offset] = useState(0);
+  const [mountain2Offset, setMountain2Offset] = useState(0);
+  const [mountain3Offset, setMountain3Offset] = useState(0);
+
+  useEffect(() => {
+    const scrollSpeedFactor = 0.1;
+    const interval = setInterval(() => {
+      setSkyOffset(prev => (prev - 0.5 * scrollSpeedFactor));
+      setMountain1Offset(prev => (prev - 1 * scrollSpeedFactor));
+      setMountain2Offset(prev => (prev - 2 * scrollSpeedFactor));
+      setMountain3Offset(prev => (prev - 3 * scrollSpeedFactor));
+    }, 16);
+    return () => clearInterval(interval);
+  }, []);
+
   return (
-    <div style={{ padding: '20px', border: '1px solid green' }}>
+    <div style={{ padding: '20px', border: '1px solid green', position: 'relative' }}> {/* Added position: 'relative' */}
+      {/* Score Display */}
+      <div style={{
+        position: 'absolute',
+        top: '10px',
+        left: '10px',
+        padding: '10px 20px',
+        backgroundColor: 'rgba(0, 0, 0, 0.5)',
+        color: 'white',
+        fontFamily: "'Press Start 2P', cursive",
+        fontSize: '1.5em',
+        borderRadius: '5px',
+        textShadow: '2px 2px #FF00FF', // Magenta shadow for pop
+        zIndex: 100
+      }}>
+        Score: {score}
+      </div>
       <h2>Game Screen</h2>
       <p>My Player ID: {playerId || 'N/A'}</p>
       <p>Connected to Opponent: {opponentId || 'Waiting for opponent...'}</p>
 
       {/* Div for Matter.js canvas */}
-      <div ref={sceneRef} style={{ width: '800px', height: '600px', border: '1px solid black', marginBottom: '20px' }} />
+      {/* Container for parallax and game canvas */}
+      <div style={{ position: 'relative', width: '800px', height: '600px', overflow: 'hidden', border: '1px solid black', marginBottom: '20px', background: 'lightblue' }}>
+        {/* Parallax Background Layers - Assuming image width is 800px */}
+        <img src={skyBackground} style={{ position: 'absolute', left: skyOffset % 1600 < -800 ? (skyOffset % 1600) + 1600 : skyOffset % 1600, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 0 }} alt="sky" />
+        <img src={skyBackground} style={{ position: 'absolute', left: (skyOffset % 1600 < -800 ? (skyOffset % 1600) + 1600 : skyOffset % 1600) + 800, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 0 }} alt="sky" />
+        <img src={mountainLayer3} style={{ position: 'absolute', left: mountain3Offset % 1600 < -800 ? (mountain3Offset % 1600) + 1600 : mountain3Offset % 1600, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 1 }} alt="far mountains" />
+        <img src={mountainLayer3} style={{ position: 'absolute', left: (mountain3Offset % 1600 < -800 ? (mountain3Offset % 1600) + 1600 : mountain3Offset % 1600) + 800, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 1 }} alt="far mountains" />
+        <img src={mountainLayer2} style={{ position: 'absolute', left: mountain2Offset % 1600 < -800 ? (mountain2Offset % 1600) + 1600 : mountain2Offset % 1600, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 2 }} alt="mid mountains" />
+        <img src={mountainLayer2} style={{ position: 'absolute', left: (mountain2Offset % 1600 < -800 ? (mountain2Offset % 1600) + 1600 : mountain2Offset % 1600) + 800, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 2 }} alt="mid mountains" />
+        <img src={mountainLayer1} style={{ position: 'absolute', left: mountain1Offset % 1600 < -800 ? (mountain1Offset % 1600) + 1600 : mountain1Offset % 1600, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 3 }} alt="near mountains" />
+        <img src={mountainLayer1} style={{ position: 'absolute', left: (mountain1Offset % 1600 < -800 ? (mountain1Offset % 1600) + 1600 : mountain1Offset % 1600) + 800, top: 0, width: '800px', height: '100%', objectFit: 'cover', zIndex: 3 }} alt="near mountains" />
+
+        {/* Matter.js canvas, ensure it's on top of parallax layers */}
+        <div ref={sceneRef} style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 4 }} />
+      </div>
 
       <div style={{ marginTop: '20px', marginBottom: '20px' }}>
         <input
