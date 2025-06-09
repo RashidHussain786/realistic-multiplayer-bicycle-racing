@@ -1,11 +1,17 @@
 // frontend/src/services/WebRTCService.ts
 import SimplePeer from 'simple-peer';
+import { GameState } from '../types/GameState'; // Import GameState
 
 class WebRTCService {
   private peer: SimplePeer.Instance | null = null;
+  private onGameStateReceived: ((state: GameState) => void) | null = null;
 
   constructor() {
     // TODO: Initialize signaling logic here
+  }
+
+  public setOnGameStateReceived(callback: ((state: GameState) => void) | null): void {
+    this.onGameStateReceived = callback;
   }
 
   public async createOffer(): Promise<SimplePeer.SignalData | undefined> {
@@ -65,7 +71,21 @@ class WebRTCService {
     });
 
     this.peer.on('data', (data) => {
-        console.log('WebRTCService: DATA event. Received message:', data.toString());
+        const message = data.toString();
+        if (message.startsWith('gameState:')) {
+          const gameStateJSON = message.substring('gameState:'.length);
+          try {
+            const gameState = JSON.parse(gameStateJSON) as GameState;
+            if (this.onGameStateReceived) {
+              this.onGameStateReceived(gameState);
+            }
+          } catch (error) {
+            console.error('WebRTCService: Error parsing game state JSON:', error);
+          }
+        } else {
+          // Handle other types of messages, e.g., chat
+          console.log('WebRTCService: DATA event. Received message:', message);
+        }
     });
 
     this.peer.on('close', () => {
@@ -79,6 +99,15 @@ class WebRTCService {
       this.peer.send(data);
     } else {
       console.warn('WebRTCService: Cannot send data: Peer is not connected.');
+    }
+  }
+
+  public sendGameState(state: object): void {
+    if (this.peer && this.peer.connected) {
+      const message = `gameState:${JSON.stringify(state)}`;
+      this.send(message);
+    } else {
+      console.warn('WebRTCService: Cannot send game state: Peer is not connected.');
     }
   }
 
