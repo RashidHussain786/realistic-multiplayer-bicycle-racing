@@ -3,6 +3,9 @@ import { useState, useEffect } from 'react';
 import webRTCService from '../services/WebRTCService';
 import type SimplePeer from 'simple-peer';
 import GameScreen from './GameScreen';
+import MatchmakingScreen from './MatchmakingScreen'; // Added import
+import mainMenuBackground from '../assets/main_menu_background.png';
+import buttonRetroBlue from '../assets/button_retro_blue.png';
 
 // TODO: Replace with your actual AWS API Gateway URL for the matchmaking service
 const API_GATEWAY_URL = 'YOUR_API_GATEWAY_URL_HERE';
@@ -153,9 +156,32 @@ function MainMenu() {
   };
 
   return (
-    <div style={{ padding: '20px' }}> {/* Added a wrapper div for consistent padding */}
-      {rtcError && ( // Display error message if it exists
-        <p style={{ color: 'red', border: '1px solid red', padding: '10px', marginBottom: '15px' }}>
+    <div style={{
+        backgroundImage: `url(${mainMenuBackground})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        minHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '20px',
+        fontFamily: "'Press Start 2P', cursive",
+        color: 'white',
+        textAlign: 'center'
+      }}>
+      {rtcError && (
+        <p style={{
+          backgroundColor: 'rgba(255, 0, 0, 0.7)',
+          border: '2px solid #AA0000',
+          borderRadius: '5px',
+          padding: '15px',
+          marginBottom: '20px',
+          color: 'white',
+          fontSize: '1.1em',
+          textShadow: '1px 1px #000000',
+          fontFamily: "'Press Start 2P', cursive"
+        }}>
           <strong>Error:</strong> {rtcError}
         </p>
       )}
@@ -169,13 +195,34 @@ function MainMenu() {
           lastMessageReceived={lastMessageReceived}
         />
       ) : isConnectingRTC ? (
-        <p>⏳ Connecting to Opponent via WebRTC... (My ID: {playerId})</p>
+        <MatchmakingScreen statusText="Connecting to Opponent..." playerId={playerId} />
       ) : isSearching ? (
-        <p>🔎 Searching for Opponent... (My ID: {playerId})</p>
+        <MatchmakingScreen statusText="Searching for Opponent..." playerId={playerId} />
       ) : (
         <div>
           <p>(My ID: {playerId})</p>
-          <button onClick={handleStartRace} disabled={!playerId}>Start Race</button>
+          <button
+            style={{
+              backgroundImage: `url(${buttonRetroBlue})`,
+              backgroundSize: 'contain',
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'center',
+              backgroundColor: 'transparent',
+              border: 'none',
+              color: 'white',
+              padding: '20px 40px',
+              fontSize: '1.5em',
+              cursor: 'pointer',
+              textShadow: '2px 2px #000000',
+              minWidth: '200px',
+              minHeight: '80px',
+              fontFamily: "'Press Start 2P', cursive"
+            }}
+            onClick={handleStartRace}
+            disabled={!playerId}
+          >
+            Start Race
+          </button>
         </div>
       )}
     </div>
