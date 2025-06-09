@@ -17,6 +17,44 @@ import { createBicycle, createCoin, createTrackWalls, createHazards } from '../u
 import RaceEndOverlay from './RaceEndOverlay'; // Import the new overlay component
 import { OpponentSyncManager } from '../utils/opponentSync'; // Import the new OpponentSyncManager
 
+// After imports, before GameScreen component
+// import { World, Bodies, Body, Engine, Composite } from 'matter-js'; // Ensure these are imported
+
+const createDustPuffSystem = (world: World, basePosition: { x: number, y: number }, count: number, engine: Engine, raceOverFlag: boolean) => {
+  if (!world || !engine || raceOverFlag) return;
+
+  for (let i = 0; i < count; i++) {
+    const radius = Math.random() * 2 + 1;
+    const puff = Bodies.circle(
+      basePosition.x - 5 - (Math.random() * 10), // Positioned behind and slightly offset from the wheel
+      basePosition.y + Math.random() * 5,     // Slightly above or below the wheel's y-axis center
+      radius,
+      {
+        isSensor: true, // Puffs don't physically interact
+        label: 'dustPuff',
+        render: {
+          fillStyle: '#BABABA', // Greyish color for dust
+          opacity: 0.5 + Math.random() * 0.2 // Semi-transparent and variable
+        },
+        frictionAir: 0.06 // Puffs should slow down and dissipate
+      }
+    );
+    // Apply a small initial velocity away from the wheel
+    Body.setVelocity(puff, {
+      x: -(Math.random() * 0.8 + 0.3), // Backwards
+      y: -(Math.random() * 0.4 + 0.1)  // Slightly upwards
+    });
+    World.add(world, puff);
+    // Remove puff after a short duration
+    setTimeout(() => {
+      // Check if engine and world still exist and race is not over, to prevent errors on component unmount or race end
+      if (engine && engine.world && !raceOverFlag) {
+        World.remove(engine.world, puff);
+      }
+    }, 250 + Math.random() * 150); // Lifespan of 250-400ms
+  }
+};
+
 interface GameScreenProps {
   opponentId: string | null;
   playerId: string | null;
@@ -223,20 +261,14 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
     const playerStartX = trackCenterX;
     const playerStartY = trackCenterY - trackOuterHeight / 2 + wallThickness + 50;
-    const playerBicycleInstance = createBicycle(playerStartX, playerStartY);
+    const playerBicycleInstance = createBicycle(playerStartX, playerStartY, 'player1');
     bicycleRef.current = playerBicycleInstance;
     World.add(world, playerBicycleInstance);
 
     const opponentStartX = trackCenterX;
     const opponentStartY = trackCenterY + trackOuterHeight / 2 - wallThickness - 50;
-    const opponentBicycleInstance = createBicycle(opponentStartX, opponentStartY);
+    const opponentBicycleInstance = createBicycle(opponentStartX, opponentStartY, 'player2');
     opponentBicycleRef.current = opponentBicycleInstance;
-    opponentBicycleInstance.bodies.forEach(b => {
-      if (b.label === 'frame' || b.label === 'wheelA' || b.label === 'wheelB') {
-        b.render.fillStyle = '#00FFFF';
-        b.render.strokeStyle = '#00AAAA';
-      }
-    });
     World.add(world, opponentBicycleInstance);
 
     const opponentFrameBody = Composite.get(opponentBicycleInstance, 'frame', 'body') as Body | null;
@@ -587,6 +619,17 @@ const GameScreen: React.FC<GameScreenProps> = ({
         console.log(
           `Target force set: ${finalForceMagnitude.toFixed(4)} (Base: ${calculatedForceMagnitude.toFixed(4)}, Ramp: ${rampUpFactor.toFixed(2)}) due to ${key.toUpperCase()} press (timeDiff: ${timeDiff}ms, speed: ${currentSpeed.toFixed(2)})`
         );
+
+        // Trigger dust puffs
+        const MIN_FORCE_FOR_DUST = 0.002; // Threshold to trigger dust
+        if (finalForceMagnitude > MIN_FORCE_FOR_DUST) {
+          if (bicycleRef.current && engineRef.current && engineRef.current.world) {
+            const rearWheelBody = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+            if (rearWheelBody) {
+              createDustPuffSystem(engineRef.current.world, rearWheelBody.position, 3, engineRef.current, raceOver);
+            }
+          }
+        }
       }
     };
 
@@ -603,7 +646,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [raceOver]); // FORCE_SCALE_FACTOR could be a dependency if it changed, but it's a const
+  }, [raceOver, engineRef, bicycleRef]); // FORCE_SCALE_FACTOR could be a dependency if it changed, but it's a const
 
   // --- HUD Update Effects ---
   useEffect(() => {
@@ -656,10 +699,10 @@ const GameScreen: React.FC<GameScreenProps> = ({
     const scrollSpeedFactor = 0.1;
     if (parallaxIntervalRef.current === null) {
       parallaxIntervalRef.current = window.setInterval(() => {
-        setSkyOffset(prev => (prev - 0.5 * scrollSpeedFactor));
-        setMountain1Offset(prev => (prev - 1 * scrollSpeedFactor));
-        setMountain2Offset(prev => (prev - 2 * scrollSpeedFactor));
-        setMountain3Offset(prev => (prev - 3 * scrollSpeedFactor));
+        setSkyOffset(prev => (prev - 0.2 * scrollSpeedFactor)); // Slowest
+        setMountain3Offset(prev => (prev - 0.5 * scrollSpeedFactor)); // Slow
+        setMountain2Offset(prev => (prev - 1.0 * scrollSpeedFactor)); // Medium
+        setMountain1Offset(prev => (prev - 1.5 * scrollSpeedFactor)); // Fast
       }, 16);
     }
 
@@ -706,7 +749,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
       <PointsDisplay points={playerCurrency} />
 
       <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 100, background: 'rgba(0,0,0,0.5)', padding: '5px', borderRadius: '5px' }}>
-        <label htmlFor="volumeSlider" style={{ color: 'white', marginRight: '5px', fontFamily: "'Press Start 2P', cursive", fontSize: '0.8em' }}>Volume:</label>
+        <label htmlFor="volumeSlider" style={{ color: 'white', marginRight: '5px', fontFamily: "'Press Start 2P', cursive", fontSize: '0.8em', textShadow: '1px 1px #000000' }}>Volume:</label>
         <input
           id="volumeSlider"
           type="range"
@@ -752,9 +795,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           placeholder="Enter message"
-          style={{ marginRight: '10px' }}
+          style={{ fontFamily: "'Press Start 2P', cursive", border: '2px solid white', borderRadius: '0px', backgroundColor: 'black', color: 'white', padding: '5px', marginRight: '10px' }}
         />
-        <button onClick={handleSend}>Send Message</button>
+        <button onClick={handleSend} style={{ fontFamily: "'Press Start 2P', cursive", border: '2px solid white', borderRadius: '0px', backgroundColor: '#DD00DD', color: 'white', textShadow: '1px 1px #000000', padding: '5px 10px' }}>Send Message</button>
       </div>
 
       {lastMessageReceived && (
@@ -764,7 +807,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         </div>
       )}
 
-      <button onClick={onDisconnect} style={{ marginTop: '20px', backgroundColor: 'red', color: 'white' }}>
+      <button onClick={onDisconnect} style={{ fontFamily: "'Press Start 2P', cursive", border: '2px solid white', borderRadius: '0px', backgroundColor: 'red', color: 'white', textShadow: '1px 1px #000000', padding: '10px 15px', marginTop: '20px' }}>
         Disconnect Call
       </button>
     </div>

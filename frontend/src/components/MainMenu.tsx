@@ -173,8 +173,8 @@ function MainMenu() {
       {rtcError && (
         <p style={{
           backgroundColor: 'rgba(255, 0, 0, 0.7)',
-          border: '2px solid #AA0000',
-          borderRadius: '5px',
+          border: '2px solid #FF0000', // Brighter red border
+          borderRadius: '0px', // Sharp corners
           padding: '15px',
           marginBottom: '20px',
           color: 'white',
@@ -200,7 +200,7 @@ function MainMenu() {
         <MatchmakingScreen statusText="Searching for Opponent..." playerId={playerId} />
       ) : (
         <div>
-          <p>(My ID: {playerId})</p>
+          <p style={{ textShadow: '1px 1px #000000' }}>(My ID: {playerId})</p>
           <button
             style={{
               backgroundImage: `url(${buttonRetroBlue})`,
