@@ -2,14 +2,20 @@ import skyBackground from '../assets/sky_background.png';
 import mountainLayer1 from '../assets/mountain_layer_1.png';
 import mountainLayer2 from '../assets/mountain_layer_2.png';
 import mountainLayer3 from '../assets/mountain_layer_3.png';
+import retroMusic from '../assets/retro_music.mp3'; // Import the music file
+import coinCollectSound from '../assets/coin_collect.wav'; // Import coin sound effect
 // frontend/src/components/GameScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import SpeedDisplay from './HUD/SpeedDisplay';
 import PositionDisplay from './HUD/PositionDisplay';
 import PointsDisplay from './HUD/PointsDisplay';
-import { Engine, Render, Runner, World, Bodies, Composite, Constraint, Body, Events } from 'matter-js';
+import { Engine, Runner, World, Bodies, Composite, Constraint, Body, Events } from 'matter-js'; // Removed Render
 import { GameState } from '../types/GameState'; // Import GameState
 import webRTCService from '../services/WebRTCService'; // Import webRTCService
+import useMatterJS from '../hooks/useMatterJS'; // Import the custom hook
+import { createBicycle, createCoin, createTrackWalls, createHazards } from '../utils/matterSetup'; // Import setup functions
+import RaceEndOverlay from './RaceEndOverlay'; // Import the new overlay component
+import { OpponentSyncManager } from '../utils/opponentSync'; // Import the new OpponentSyncManager
 
 interface GameScreenProps {
   opponentId: string | null;
@@ -22,77 +28,7 @@ interface GameScreenProps {
 
 const RACE_DURATION_MS = 60000; // 1 minute for the race
 
-// Function to create a bicycle composite
-const createBicycle = (x: number, y: number): Composite => {
-  const group = Body.nextGroup(true);
-  const wheelRadius = 20;
-  const wheelGap = 50; // Distance from center of frame to center of wheels horizontally
-  const frameHeight = 30;
-  const frameWidth = 100;
-
-  // Wheels
-  const wheelA = Bodies.circle(x - wheelGap, y + frameHeight / 2, wheelRadius, {
-    label: 'wheelA', // Front wheel
-    collisionFilter: { group: group },
-    friction: 0.8,
-  });
-  const wheelB = Bodies.circle(x + wheelGap, y + frameHeight / 2, wheelRadius, {
-    label: 'wheelB', // Rear wheel
-    collisionFilter: { group: group },
-    friction: 0.8,
-  });
-
-  // Frame
-  const frame = Bodies.rectangle(x, y, frameWidth, frameHeight, {
-    label: 'frame',
-    collisionFilter: { group: group },
-    density: 0.005, // Adjust density as needed
-  });
-
-  // Axles (constraints)
-  const axleA = Constraint.create({
-    bodyA: frame,
-    pointA: { x: -wheelGap, y: 0 }, // Relative to frame's center
-    bodyB: wheelA,
-    pointB: { x: 0, y: 0 }, // Relative to wheelA's center
-    stiffness: 1.0, // Increased stiffness
-    length: 0, // Length of 0 makes it act like a pin
-  });
-
-  const axleB = Constraint.create({
-    bodyA: frame,
-    pointA: { x: wheelGap, y: 0 }, // Relative to frame's center
-    bodyB: wheelB,
-    pointB: { x: 0, y: 0 }, // Relative to wheelB's center
-    stiffness: 1.0, // Increased stiffness
-    length: 0,
-  });
-
-  const bicycleComposite = Composite.create({ label: 'Bicycle' });
-  Composite.addBody(bicycleComposite, wheelA);
-  Composite.addBody(bicycleComposite, wheelB);
-  Composite.addBody(bicycleComposite, frame);
-  Composite.addConstraint(bicycleComposite, axleA);
-  Composite.addConstraint(bicycleComposite, axleB);
-
-  return bicycleComposite;
-};
-
-// Function to create a coin body
-const createCoin = (x: number, y: number): Body => {
-  const coinRadius = 10; // Small radius for the coin
-  const coin = Bodies.circle(x, y, coinRadius, {
-    isStatic: true, // Coins don't move on their own
-    isSensor: true, // Coins don't cause physical collisions, only trigger events
-    label: 'coin',
-    render: {
-      fillStyle: '#FFD700', // Gold color for the coin placeholder
-      // TODO: Replace this with a proper coin sprite
-    },
-  });
-  return coin;
-};
-
+// createBicycle and createCoin functions are now imported from ../utils/matterSetup
 
 const GameScreen: React.FC<GameScreenProps> = ({
   opponentId,
@@ -101,239 +37,189 @@ const GameScreen: React.FC<GameScreenProps> = ({
   onSendMessage,
   lastMessageReceived,
 }) => {
-  const [message, setMessage] = useState('');
-  const [playerCurrency, setPlayerCurrency] = useState(0); // Player's currency
+  // --- Core Game State ---
+  const [raceStartTime, setRaceStartTime] = useState<number | null>(null);
+  const [raceOver, setRaceOver] = useState(false);
   const [coins, setCoins] = useState<Body[]>([]); // Array to store coin bodies
-  const COIN_VALUE = 10;
+
+  // --- Player State ---
+  const [playerCurrency, setPlayerCurrency] = useState(0);
   const [displaySpeed, setDisplaySpeed] = useState(0);
-  const [opponentCurrency, setOpponentCurrency] = useState(0); // Opponent's currency
   const [playerPosition, setPlayerPosition] = useState<1 | 2>(1);
-  const [raceStartTime, setRaceStartTime] = useState<number | null>(null); // For race timer
-  const [raceOver, setRaceOver] = useState(false); // To track if the race has ended
-  const sceneRef = useRef<HTMLDivElement>(null);
-  const engineRef = useRef<Engine | null>(null);
-  const runnerRef = useRef<Runner | null>(null);
-  const bicycleRef = useRef<Composite | null>(null); // Ref to store the player's bicycle composite
-  const opponentBicycleRef = useRef<Composite | null>(null); // Ref to store the opponent's bicycle composite
-  const opponentStateBufferRef = useRef<Array<{ state: GameState, receivedTime: number }>>([]);
-  const opponentVisualStateRef = useRef<{ position: { x: number, y: number }, angle: number, wheelSpeed: number } | null>(null);
+
+  // --- Opponent State ---
+  const [opponentCurrency, setOpponentCurrency] = useState(0);
+
+  // --- UI Interaction State ---
+  const [message, setMessage] = useState(''); // For chat input
+
+  // --- Audio State ---
+  const [volume, setVolume] = useState(0.5);
+
+  // --- Refs ---
+  // Matter.js Core Refs
+  const sceneRef = useRef<HTMLDivElement>(null); // For Matter.js canvas
+  const bicycleRef = useRef<Composite | null>(null);
+  const opponentBicycleRef = useRef<Composite | null>(null);
+  // Player Input Refs
   const lastAPressTimeRef = useRef<number>(0);
   const lastDPressTimeRef = useRef<number>(0);
   const targetForceRef = useRef<number>(0);
   const currentAppliedForceRef = useRef<number>(0);
-  const lastPotholeCollisionTimeRef = useRef<number>(0); // For pothole effect cooldown
-  const lastOilSlickCollisionTimeRef = useRef<number>(0); // For oil slick effect cooldown
-  const collectedCoinIdsRef = useRef<Set<number>>(new Set()); // Keep track of collected coin IDs in the current collision event processing cycle
+  // Collision/Effect Cooldown Refs
+  const lastPotholeCollisionTimeRef = useRef<number>(0);
+  const lastOilSlickCollisionTimeRef = useRef<number>(0);
+  const collectedCoinIdsRef = useRef<Set<number>>(new Set());
+  // Opponent Sync Refs
+  const opponentSyncManagerRef = useRef(new OpponentSyncManager()); // Instantiate the manager
+  const opponentVisualStateRef = useRef<{ position: { x: number, y: number }, angle: number, wheelSpeed: number } | null>(null);
+  // Audio Refs
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  // UI/Animation Refs
+  const parallaxIntervalRef = useRef<number | null>(null);
 
 
-  // Constants for physics behavior
+  // --- Constants ---
+  const COIN_VALUE = 10;
   const FORCE_SMOOTHING_FACTOR = 0.1;
-  const TARGET_FORCE_DECAY_FACTOR = 0.95; // Decay per frame
+  const TARGET_FORCE_DECAY_FACTOR = 0.95;
   const MIN_APPLIED_FORCE_THRESHOLD = 0.001;
 
-  // Effect to set race start time
+  // --- Initialization & Hooks ---
+
+  // Initialize Matter.js using the custom hook
+  const { engineRef } = useMatterJS({ sceneRef, isRunning: !raceOver });
+
+  // --- Game Lifecycle Effects ---
   useEffect(() => {
     setRaceStartTime(Date.now());
   }, []);
 
-  // Effect for Matter.js setup and cleanup
+  // Race End Logic
   useEffect(() => {
-    if (raceOver || !sceneRef.current) {
-        if (raceOver) {
-            // Ensure Matter.js is stopped if race ends.
-            // The race end logic useEffect already handles this, but this is a safeguard.
-            if (runnerRef.current) Runner.stop(runnerRef.current);
-            if (engineRef.current) {
-                Events.off(engineRef.current, 'collisionStart');
-                Events.off(engineRef.current, 'beforeUpdate');
-                Events.off(engineRef.current, 'afterUpdate');
-            }
-        }
-        console.log("Matter.js setup skipped or cleaned up: raceOver is", raceOver, "or sceneRef not current.");
-        return;
-    }
-    // Removed !engineRef check as it's a ref object, not its current value.
+    if (raceOver || !raceStartTime || !props.onRaceEnd) return;
 
-    // Create engine
-    const engine = Engine.create();
-    engineRef.current = engine;
+    const timerInterval = setInterval(() => {
+      if (Date.now() - raceStartTime >= RACE_DURATION_MS) {
+        if (!raceOver) {
+          setRaceOver(true);
+          console.log("Race over! Determining winner...");
+
+          if (engineRef.current) {
+            Events.off(engineRef.current, 'collisionStart');
+            Events.off(engineRef.current, 'beforeUpdate');
+            Events.off(engineRef.current, 'afterUpdate');
+            console.log("Race End: Matter.js event listeners cleared for physics updates.");
+          }
+
+          let winnerName = "Player";
+          const playerFrameBody = bicycleRef.current ? Composite.get(bicycleRef.current, 'frame', 'body') as Body | null : null;
+          const playerX = playerFrameBody ? playerFrameBody.position.x : 0;
+          const opponentX = opponentVisualStateRef.current?.position?.x || 0;
+
+          if (playerCurrency > opponentCurrency) {
+            winnerName = "Player";
+          } else if (opponentCurrency > playerCurrency) {
+            winnerName = "Opponent";
+          } else {
+            if (playerX > opponentX) {
+              winnerName = "Player";
+            } else if (opponentX > playerX) {
+              winnerName = "Opponent";
+            } else {
+              winnerName = "Player";
+            }
+          }
+          console.log(`Winner determined: ${winnerName}, Player Final Currency: ${playerCurrency}`);
+          props.onRaceEnd(winnerName, playerCurrency);
+        }
+        clearInterval(timerInterval);
+      }
+    }, 1000);
+
+    return () => clearInterval(timerInterval);
+  }, [raceStartTime, raceOver, playerCurrency, opponentCurrency, props.onRaceEnd, props]);
+
+
+  // --- Audio Effects ---
+  useEffect(() => {
+    audioRef.current = new Audio(retroMusic);
+    audioRef.current.loop = true;
+    audioRef.current.volume = volume;
+
+    const handleAudioError = (e: Event) => {
+      console.error("Error loading audio:", e);
+    };
+    audioRef.current.addEventListener('error', handleAudioError);
+
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.removeEventListener('error', handleAudioError);
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      if (raceStartTime && !raceOver) {
+        audioRef.current.volume = volume;
+        audioRef.current.play().catch(error => {
+          console.error("Error playing audio:", error);
+        });
+      } else if (raceOver) {
+        audioRef.current.pause();
+      }
+    }
+  }, [raceStartTime, raceOver, volume]);
+
+  // --- Matter.js Game Logic & World Setup Effects ---
+  useEffect(() => {
+    if (raceOver || !sceneRef.current || !engineRef.current) {
+      if (raceOver && engineRef.current) {
+        Events.off(engineRef.current, 'collisionStart');
+        Events.off(engineRef.current, 'beforeUpdate');
+        Events.off(engineRef.current, 'afterUpdate');
+        console.log("Game-specific Matter.js event listeners cleared due to raceOver condition in setup effect.");
+      }
+      console.log(
+        "Matter.js game logic setup skipped: raceOver is", raceOver,
+        "or sceneRef not current, or engineRef from hook not current."
+      );
+      return;
+    }
+
+    const engine = engineRef.current;
     const world = engine.world;
 
-    // Create renderer
-    const render = Render.create({
-      element: sceneRef.current,
-      engine: engine,
-      options: {
-        width: 800,
-        height: 600,
-        wireframes: false, // Set to true for debugging
-        background: 'transparent', // Parallax background
-      },
-    });
-
-    // Create runner
-    const runner = Runner.create();
-    runnerRef.current = runner;
-
-    // Add bodies
-    // const ground = Bodies.rectangle(400, 590, 810, 60, { isStatic: true, label: 'ground' }); // Ground
-    // World.add(world, [ground]); // Ground removed for track
-
-    // Track dimensions and properties
     const canvasWidth = 800;
     const canvasHeight = 600;
-    const trackOuterWidth = 700;
-    const trackOuterHeight = 450;
-    const trackInnerWidth = 500;
-    const trackInnerHeight = 250;
-    const wallThickness = 20;
-    // const cornerRadius = 100; // Conceptual
-
     const trackCenterX = canvasWidth / 2;
     const trackCenterY = canvasHeight / 2;
+    const trackOuterHeight = 450;
+    const wallThickness = 20;
+    const trackInnerHeight = 250;
+    const trackOuterWidth = 700;
 
-    const trackWallStyle = { isStatic: true, label: 'trackWall', render: { fillStyle: '#3333FF' } }; // Vibrant Blue
-
-    const wallBodies = [];
-
-    // Outer walls
-    // Top outer wall
-    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY - trackOuterHeight / 2 + wallThickness / 2, trackOuterWidth - 2 * 100, wallThickness, trackWallStyle)); // Shortened for corners
-    // Bottom outer wall
-    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY + trackOuterHeight / 2 - wallThickness / 2, trackOuterWidth - 2 * 100, wallThickness, trackWallStyle)); // Shortened for corners
-    // Left outer wall
-    wallBodies.push(Bodies.rectangle(trackCenterX - trackOuterWidth / 2 + wallThickness / 2, trackCenterY, wallThickness, trackOuterHeight - 2 * 100, trackWallStyle)); // Shortened for corners
-    // Right outer wall
-    wallBodies.push(Bodies.rectangle(trackCenterX + trackOuterWidth / 2 - wallThickness / 2, trackCenterY, wallThickness, trackOuterHeight - 2 * 100, trackWallStyle)); // Shortened for corners
-
-    // Inner walls
-    // Top inner wall
-    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY - trackInnerHeight / 2 + wallThickness / 2, trackInnerWidth - 2 * 50, wallThickness, trackWallStyle)); // Shortened for corners
-    // Bottom inner wall
-    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY + trackInnerHeight / 2 - wallThickness / 2, trackInnerWidth - 2 * 50, wallThickness, trackWallStyle)); // Shortened for corners
-    // Left inner wall
-    wallBodies.push(Bodies.rectangle(trackCenterX - trackInnerWidth / 2 + wallThickness / 2, trackCenterY, wallThickness, trackInnerHeight - 2 * 50, trackWallStyle)); // Shortened for corners
-    // Right inner wall
-    wallBodies.push(Bodies.rectangle(trackCenterX + trackInnerWidth / 2 - wallThickness / 2, trackCenterY, wallThickness, trackInnerHeight - 2 * 50, trackWallStyle)); // Shortened for corners
-
-    // Approximate corners with small rectangles
-    const cornerSegments = 6;
-    const segmentAngle = Math.PI / 2 / cornerSegments;
-    const outerCornerRadius = (trackOuterHeight - trackInnerHeight) / 4; // Approximate
-    const innerCornerRadius = outerCornerRadius;
-
-
-    // Outer corners
-    // Top-left outer corner
-    for (let i = 0; i < cornerSegments; i++) {
-      const angle = Math.PI + i * segmentAngle + segmentAngle / 2;
-      const x = trackCenterX - (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2) ;
-      const y = trackCenterY - (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2) ;
-      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-     // Top-right outer corner
-    for (let i = 0; i < cornerSegments; i++) {
-      const angle = Math.PI * 1.5 + i * segmentAngle + segmentAngle / 2;
-      const x = trackCenterX + (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2);
-      const y = trackCenterY - (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2);
-      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-    // Bottom-left outer corner
-    for (let i = 0; i < cornerSegments; i++) {
-      const angle = Math.PI * 0.5 + i * segmentAngle + segmentAngle / 2;
-      const x = trackCenterX - (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2);
-      const y = trackCenterY + (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2);
-      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-    // Bottom-right outer corner
-    for (let i = 0; i < cornerSegments; i++) {
-      const angle = 0 + i * segmentAngle + segmentAngle / 2;
-      const x = trackCenterX + (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2);
-      const y = trackCenterY + (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2);
-      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-
-    // Inner corners (similar logic, adjusted radii and positions)
-    // Top-left inner corner
-    for (let i = 0; i < cornerSegments; i++) {
-        const angle = Math.PI + i * segmentAngle + segmentAngle / 2;
-        const x = trackCenterX - (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
-        const y = trackCenterY - (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
-        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-    // Top-right inner corner
-    for (let i = 0; i < cornerSegments; i++) {
-        const angle = Math.PI * 1.5 + i * segmentAngle + segmentAngle / 2;
-        const x = trackCenterX + (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
-        const y = trackCenterY - (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
-        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-    // Bottom-left inner corner
-    for (let i = 0; i < cornerSegments; i++) {
-        const angle = Math.PI * 0.5 + i * segmentAngle + segmentAngle / 2;
-        const x = trackCenterX - (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
-        const y = trackCenterY + (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
-        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-    // Bottom-right inner corner
-    for (let i = 0; i < cornerSegments; i++) {
-        const angle = 0 + i * segmentAngle + segmentAngle / 2;
-        const x = trackCenterX + (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
-        const y = trackCenterY + (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
-        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
-    }
-
-
-    World.add(world, wallBodies);
-
-    // Hazard Properties
-    const potholeRadius = 18;
-    const potholeStyle = { isStatic: true, isSensor: true, label: 'pothole', render: { fillStyle: '#FF6600' } }; // Bright Orange
-    const oilSlickWidth = 30;
-    const oilSlickHeight = 80;
-    const oilSlickStyle = { isStatic: true, isSensor: true, label: 'oilSlick', render: { fillStyle: '#6600CC' } }; // Purple
-
-
-    // Hazard Placement Calculations
-    const p1x = trackCenterX + 50;
-    const p1y = trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4);
-    const p2x = trackCenterX - 50;
-    const p2y = trackCenterY + (trackInnerHeight / 2) + ((trackOuterHeight - trackInnerHeight) / 4);
-    const o1x = trackCenterX - (trackInnerWidth / 2) - ((trackOuterWidth - trackInnerWidth) / 4);
-    const o1y = trackCenterY - 50;
-    const o2x = trackCenterX + (trackInnerWidth / 2) + ((trackOuterWidth - trackInnerWidth) / 4);
-    const o2y = trackCenterY + 50;
-
-    // Create Hazard Bodies
-    const pothole1 = Bodies.circle(p1x, p1y, potholeRadius, potholeStyle);
-    const pothole2 = Bodies.circle(p2x, p2y, potholeRadius, potholeStyle);
-    const oilSlick1 = Bodies.rectangle(o1x, o1y, 80, 30, { ...oilSlickStyle, angle: Math.PI / 2 });
-    const oilSlick2 = Bodies.rectangle(o2x, o2y, 80, 30, { ...oilSlickStyle, angle: Math.PI / 2 });
-
-    World.add(world, [pothole1, pothole2, oilSlick1, oilSlick2]);
-
-    // Create and add a coin (placeholder)
-    // TODO: Replace this with proper coin sprite and potentially more sophisticated placement logic
-    // const coinX = trackCenterX + 100; // Example position
-    // const coinY = trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4); // Example position (on the track)
-    // const coinInstance = createCoin(coinX, coinY);
-    // World.add(world, coinInstance);
+    createTrackWalls(world, canvasWidth, canvasHeight);
+    createHazards(world, canvasWidth, canvasHeight);
 
     const coinPositions = [
-      { x: trackCenterX + 100, y: trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4) + 10 }, // Adjusted Y slightly
-      { x: trackCenterX - 150, y: trackCenterY + (trackInnerHeight / 2) + ((trackOuterHeight - trackInnerHeight) / 4) - 10 }, // Adjusted Y slightly
-      { x: trackCenterX, y: trackCenterY + (trackOuterHeight / 2) - wallThickness - 30 }, // Near bottom middle of track
-      { x: trackCenterX + (trackOuterWidth / 2) - wallThickness - 80, y: trackCenterY + 50 }, // Right side, mid height on outer part of track curve
-      { x: trackCenterX - (trackOuterWidth / 2) + wallThickness + 80, y: trackCenterY - 50 }, // Left side, mid height on outer part of track curve
+      { x: trackCenterX + 100, y: trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4) + 10 },
+      { x: trackCenterX - 150, y: trackCenterY + (trackInnerHeight / 2) + ((trackOuterHeight - trackInnerHeight) / 4) - 10 },
+      { x: trackCenterX, y: trackCenterY + (trackOuterHeight / 2) - wallThickness - 30 },
+      { x: trackCenterX + (trackOuterWidth / 2) - wallThickness - 80, y: trackCenterY + 50 },
+      { x: trackCenterX - (trackOuterWidth / 2) - wallThickness + 80, y: trackCenterY - 50 },
     ];
 
-    const createdCoins: Body[] = [];
+    const createdCoinsList: Body[] = [];
     coinPositions.forEach(pos => {
       const newCoin = createCoin(pos.x, pos.y);
       World.add(world, newCoin);
-      createdCoins.push(newCoin);
+      createdCoinsList.push(newCoin);
     });
-    setCoins(createdCoins);
+    setCoins(createdCoinsList);
 
     const playerStartX = trackCenterX;
     const playerStartY = trackCenterY - trackOuterHeight / 2 + wallThickness + 50;
@@ -347,8 +233,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
     opponentBicycleRef.current = opponentBicycleInstance;
     opponentBicycleInstance.bodies.forEach(b => {
       if (b.label === 'frame' || b.label === 'wheelA' || b.label === 'wheelB') {
-        b.render.fillStyle = '#00FFFF'; // Cyan for opponent bike
-        b.render.strokeStyle = '#00AAAA'; // Darker cyan for opponent outline
+        b.render.fillStyle = '#00FFFF';
+        b.render.strokeStyle = '#00AAAA';
       }
     });
     World.add(world, opponentBicycleInstance);
@@ -361,30 +247,22 @@ const GameScreen: React.FC<GameScreenProps> = ({
     if (opponentWheelABody) Body.set(opponentWheelABody, { isSensor: true });
     if (opponentWheelBBody) Body.set(opponentWheelBBody, { isSensor: true });
 
-
-    Runner.run(runner, engine);
-    Render.run(render);
-
-    // Function to remove a coin
     const removeCoin = (coinBody: Body) => {
       if (engineRef.current && engineRef.current.world) {
         World.remove(engineRef.current.world, coinBody);
       }
       setCoins(prevCoins => prevCoins.filter(c => c.id !== coinBody.id));
-      // Add to collected set to prevent re-processing if somehow still in collision pairs
       collectedCoinIdsRef.current.add(coinBody.id);
     };
 
     const handleCollision = (event: Matter.IEventCollision<Engine>) => {
-      if (raceOver || !bicycleRef.current || !engineRef.current) return; // Check raceOver
+      if (raceOver || !bicycleRef.current || !engineRef.current) return;
       const playerParts = Composite.allBodies(bicycleRef.current);
       const pairs = event.pairs;
-      collectedCoinIdsRef.current.clear(); // Clear at the start of new collision event processing
+      collectedCoinIdsRef.current.clear();
 
       for (let i = 0; i < pairs.length; i++) {
         const pair = pairs[i];
-
-        // Check for player-coin collision
         let playerPart = null;
         let coinBody = null;
 
@@ -399,11 +277,13 @@ const GameScreen: React.FC<GameScreenProps> = ({
         if (playerPart && coinBody && !collectedCoinIdsRef.current.has(coinBody.id)) {
           console.log('Coin collected:', coinBody.id);
           setPlayerCurrency(prevCurrency => prevCurrency + COIN_VALUE);
+
+          const sound = new Audio(coinCollectSound);
+          sound.volume = volume;
+          sound.play().catch(e => console.error("Error playing coin sound:", e));
           removeCoin(coinBody);
-          // No need to add to collectedCoinIdsRef.current here, removeCoin does it.
         } else {
-          // Check for player-hazard collision (original logic)
-          let playerBodyForHazard = null; // Renamed to avoid conflict
+          let playerBodyForHazard = null;
           let hazardBody = null;
           const isBodyAPlayerPart = playerParts.some(part => part.id === pair.bodyA.id);
           const isBodyBPlayerPart = playerParts.some(part => part.id === pair.bodyB.id);
@@ -419,7 +299,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
           if (playerBodyForHazard && hazardBody) {
             if (hazardBody.label === 'pothole') {
               const now = Date.now();
-              const POTHOLE_COOLDOWN = 1000; // Define POTHOLE_COOLDOWN if not already
+              const POTHOLE_COOLDOWN = 1000;
               if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
                 console.log('Applying pothole effect...');
                 lastPotholeCollisionTimeRef.current = now;
@@ -437,7 +317,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
               }
             } else if (hazardBody.label === 'oilSlick') {
               const now = Date.now();
-              const OIL_SLICK_COOLDOWN = 1500; // Define OIL_SLICK_COOLDOWN if not already
+              const OIL_SLICK_COOLDOWN = 1500;
               if (now - lastOilSlickCollisionTimeRef.current > OIL_SLICK_COOLDOWN) {
                 console.log('Applying oil slick effect...');
                 lastOilSlickCollisionTimeRef.current = now;
@@ -453,47 +333,108 @@ const GameScreen: React.FC<GameScreenProps> = ({
         }
       }
     };
-    Events.on(engine, 'collisionStart', handleCollision);
 
-    const RENDER_DELAY = 100;
-            const POTHOLE_COOLDOWN = 1000;
-            if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
-              console.log('Applying pothole effect...');
-              lastPotholeCollisionTimeRef.current = now;
-              const playerBicycleParts = Composite.allBodies(bicycleRef.current!);
-              playerBicycleParts.forEach(part => {
-                Body.setVelocity(part, {
-                  x: part.velocity.x * 0.5,
-                  y: part.velocity.y * 0.5
-                });
-              });
-              const rearWheel = Composite.get(bicycleRef.current!, 'wheelB', 'body') as Body | null;
-              const frontWheel = Composite.get(bicycleRef.current!, 'wheelA', 'body') as Body | null;
-              if (rearWheel) Body.setAngularVelocity(rearWheel, rearWheel.angularVelocity * 0.5);
-              if (frontWheel) Body.setAngularVelocity(frontWheel, frontWheel.angularVelocity * 0.5);
-            }
-          } else if (hazardBody.label === 'oilSlick') {
-            const now = Date.now();
-            const OIL_SLICK_COOLDOWN = 1500;
-            if (now - lastOilSlickCollisionTimeRef.current > OIL_SLICK_COOLDOWN) {
-              console.log('Applying oil slick effect...');
-              lastOilSlickCollisionTimeRef.current = now;
-              const playerFrame = Composite.get(bicycleRef.current!, 'frame', 'body') as Body | null;
-              const forceMagnitude = 0.0025;
-              const direction = Math.random() < 0.5 ? -1 : 1;
-              if (playerFrame) {
-                Body.applyForce(playerFrame, playerFrame.position, { x: forceMagnitude * direction, y: 0 });
-              }
-            }
+    // --- Collision Handler Helper Functions ---
+    // (Defined within useEffect to close over necessary state/refs like volume, setPlayerCurrency, COIN_VALUE, bicycleRef, etc.)
+
+    const processPlayerCoinCollision = (coinBody: Body) => {
+      if (!collectedCoinIdsRef.current.has(coinBody.id)) {
+        console.log('Coin collected:', coinBody.id);
+        setPlayerCurrency(prevCurrency => prevCurrency + COIN_VALUE);
+
+        const sound = new Audio(coinCollectSound);
+        sound.volume = volume;
+        sound.play().catch(e => console.error("Error playing coin sound:", e));
+
+        // Call removeCoin which is defined in the outer scope of this useEffect
+        // Ensure removeCoin is available and correctly defined in the outer scope.
+        // Assuming removeCoin is defined similar to:
+        // const removeCoin = (cb: Body) => { /* logic to remove coin from world and state */ };
+        // For this refactor, we are focusing on handleCollision structure.
+        // We need to ensure `removeCoin` is accessible. It is defined before `handleCollision`.
+        removeCoin(coinBody);
+      }
+    };
+
+    const processPlayerPotholeCollision = () => {
+      const now = Date.now();
+      const POTHOLE_COOLDOWN = 1000;
+      if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
+        console.log('Applying pothole effect...');
+        lastPotholeCollisionTimeRef.current = now;
+        if (bicycleRef.current) {
+          const playerBicycleParts = Composite.allBodies(bicycleRef.current);
+          playerBicycleParts.forEach(part => {
+            Body.setVelocity(part, {
+              x: part.velocity.x * 0.5,
+              y: part.velocity.y * 0.5
+            });
+          });
+          const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+          const frontWheel = Composite.get(bicycleRef.current, 'wheelA', 'body') as Body | null;
+          if (rearWheel) Body.setAngularVelocity(rearWheel, rearWheel.angularVelocity * 0.5);
+          if (frontWheel) Body.setAngularVelocity(frontWheel, frontWheel.angularVelocity * 0.5);
+        }
+      }
+    };
+
+    const processPlayerOilSlickCollision = () => {
+      const now = Date.now();
+      const OIL_SLICK_COOLDOWN = 1500;
+      if (now - lastOilSlickCollisionTimeRef.current > OIL_SLICK_COOLDOWN) {
+        console.log('Applying oil slick effect...');
+        lastOilSlickCollisionTimeRef.current = now;
+        if (bicycleRef.current) {
+          const playerFrame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
+          const forceMagnitude = 0.0025;
+          const direction = Math.random() < 0.5 ? -1 : 1;
+          if (playerFrame) {
+            Body.applyForce(playerFrame, playerFrame.position, { x: forceMagnitude * direction, y: 0 });
+          }
+        }
+      }
+    };
+
+    // --- Main Collision Handler ---
+    // Dispatches to specific handlers based on collision pair labels
+    const handleCollision = (event: Matter.IEventCollision<Engine>) => {
+      if (raceOver || !bicycleRef.current || !engineRef.current) return;
+      const playerParts = Composite.allBodies(bicycleRef.current);
+      const pairs = event.pairs;
+      collectedCoinIdsRef.current.clear();
+
+      for (let i = 0; i < pairs.length; i++) {
+        const pair = pairs[i];
+
+        const isBodyAPlayerPart = playerParts.some(part => part.id === pair.bodyA.id);
+        const isBodyBPlayerPart = playerParts.some(part => part.id === pair.bodyB.id);
+
+        let playerCollidedBody: Body | null = null;
+        let otherBody: Body | null = null;
+
+        if (isBodyAPlayerPart) {
+          playerCollidedBody = pair.bodyA;
+          otherBody = pair.bodyB;
+        } else if (isBodyBPlayerPart) {
+          playerCollidedBody = pair.bodyB;
+          otherBody = pair.bodyA;
+        }
+
+        if (playerCollidedBody && otherBody) {
+          if (otherBody.label === 'coin') {
+            processPlayerCoinCollision(otherBody);
+          } else if (otherBody.label === 'pothole') {
+            processPlayerPotholeCollision(); // playerCollidedBody and otherBody can be passed if needed by helper
+          } else if (otherBody.label === 'oilSlick') {
+            processPlayerOilSlickCollision(); // playerCollidedBody and otherBody can be passed if needed by helper
           }
         }
       }
     };
     Events.on(engine, 'collisionStart', handleCollision);
 
-    const RENDER_DELAY = 100;
     const gameLoop = () => {
-      if (raceOver) return; // Check raceOver
+      if (raceOver || !engineRef.current) return;
       const targetForce = targetForceRef.current;
       const currentAppliedForce = currentAppliedForceRef.current;
       const newAppliedForce = currentAppliedForce + (targetForce - currentAppliedForce) * FORCE_SMOOTHING_FACTOR;
@@ -508,58 +449,16 @@ const GameScreen: React.FC<GameScreenProps> = ({
       if (Math.abs(targetForceRef.current) < MIN_APPLIED_FORCE_THRESHOLD) {
         targetForceRef.current = 0;
       }
+
+      // Opponent state interpolation using OpponentSyncManager
       if (opponentBicycleRef.current && engineRef.current) {
-        const buffer = opponentStateBufferRef.current;
-        const renderTimestamp = performance.now();
-        if (buffer.length > 0) {
-          let s1 = null, s2 = null;
-          const targetTime = renderTimestamp - RENDER_DELAY;
-          for (let i = buffer.length - 1; i >= 0; i--) {
-            if (buffer[i].state.timestamp <= targetTime) {
-              s1 = buffer[i];
-              if (i + 1 < buffer.length) {
-                s2 = buffer[i + 1];
-              }
-              break;
-            }
-          }
-          if (s1 && s2) {
-            const t1 = s1.state.timestamp;
-            const t2 = s2.state.timestamp;
-            let factor = 0;
-            if (t2 - t1 > 0) {
-                factor = (targetTime - t1) / (t2 - t1);
-            }
-            factor = Math.max(0, Math.min(1, factor));
-            const prevPos = s1.state.position;
-            const nextPos = s2.state.position;
-            const interpolatedX = prevPos.x + (nextPos.x - prevPos.x) * factor;
-            const interpolatedY = prevPos.y + (nextPos.y - prevPos.y) * factor;
-            const prevAngle = s1.state.angle;
-            const nextAngle = s2.state.angle;
-            const interpolatedAngle = prevAngle + (nextAngle - prevAngle) * factor;
-            opponentVisualStateRef.current = {
-              position: { x: interpolatedX, y: interpolatedY },
-              angle: interpolatedAngle,
-              wheelSpeed: s2.state.wheelSpeed,
-            };
-          } else if (s1) {
-            const latestStateEntry = buffer[buffer.length - 1];
-            opponentVisualStateRef.current = {
-              position: { ...latestStateEntry.state.position },
-              angle: latestStateEntry.state.angle,
-              wheelSpeed: latestStateEntry.state.wheelSpeed,
-            };
-          } else if (buffer.length > 0) {
-            const latestStateEntry = buffer[buffer.length - 1];
-            opponentVisualStateRef.current = {
-              position: { ...latestStateEntry.state.position },
-              angle: latestStateEntry.state.angle,
-              wheelSpeed: latestStateEntry.state.wheelSpeed,
-            };
-          }
+        const visualState = opponentSyncManagerRef.current.getInterpolatedState(performance.now());
+        if (visualState) {
+          opponentVisualStateRef.current = visualState;
         }
-        if (opponentVisualStateRef.current && opponentBicycleRef.current) {
+
+        // Apply the visual state to the opponent's bicycle
+        if (opponentVisualStateRef.current) { // Check if we have a state to apply
           const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
           const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
           if (opponentFrame && opponentRearWheel) {
@@ -571,8 +470,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
       }
     };
     Events.on(engine, 'beforeUpdate', gameLoop);
+
     const handlePlayerStateSend = () => {
-      if (raceOver || !bicycleRef.current || !engineRef.current) return; // Check raceOver
+      if (raceOver || !bicycleRef.current || !engineRef.current) return;
       if (bicycleRef.current && engineRef.current) {
         const frame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
         const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
@@ -581,7 +481,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
             position: { x: frame.position.x, y: frame.position.y },
             angle: frame.angle,
             wheelSpeed: rearWheel.angularVelocity,
-            currency: playerCurrency, // Add player currency to game state
+            currency: playerCurrency,
             timestamp: performance.now(),
           };
           webRTCService.sendGameState(gameState);
@@ -589,44 +489,35 @@ const GameScreen: React.FC<GameScreenProps> = ({
       }
     };
     Events.on(engine, 'afterUpdate', handlePlayerStateSend);
+
     return () => {
-      Events.off(engine, 'collisionStart', handleCollision);
-      Events.off(engine, 'beforeUpdate', gameLoop);
-      Events.off(engine, 'afterUpdate', handlePlayerStateSend);
-      if (runnerRef.current) {
-        Runner.stop(runnerRef.current);
-      }
       if (engineRef.current) {
-        Composite.clear(engineRef.current.world, false, true);
-        Engine.clear(engineRef.current);
-      }
-      Render.stop(render);
-      if (render.canvas) {
-        render.canvas.remove();
+        Events.off(engineRef.current, 'collisionStart', handleCollision);
+        Events.off(engineRef.current, 'beforeUpdate', gameLoop);
+        Events.off(engineRef.current, 'afterUpdate', handlePlayerStateSend);
+        console.log("Game-specific Matter.js event listeners cleaned up from setup effect.");
       }
     };
-  }, [raceOver]); // Add raceOver: if it becomes true, this effect will re-run and stop/cleanup Matter.js
+  }, [raceOver, engineRef, volume, playerCurrency]); // Added volume and playerCurrency as dependencies due to their use in event handlers
 
+  // --- WebRTC Effects ---
   useEffect(() => {
     if (raceOver) {
-      webRTCService.setOnGameStateReceived(null); // Stop listening to opponent updates
+      webRTCService.setOnGameStateReceived(null);
       return;
     }
     const BUFFER_SIZE_LIMIT = 20;
     webRTCService.setOnGameStateReceived((receivedGameState: GameState) => {
-      if (raceOver) return; // Extra check for safety
-      const receivedTime = performance.now();
-      opponentStateBufferRef.current.push({ state: receivedGameState, receivedTime });
-      if (opponentStateBufferRef.current.length > BUFFER_SIZE_LIMIT) {
-        opponentStateBufferRef.current.shift();
+      if (raceOver) return;
+
+      opponentSyncManagerRef.current.addState(receivedGameState);
+      const latestOpponentCurrency = opponentSyncManagerRef.current.getLatestCurrency();
+      if (latestOpponentCurrency !== null) {
+        setOpponentCurrency(latestOpponentCurrency);
       }
 
-      // Update opponent currency if present in the received state
-      if (typeof receivedGameState.currency === 'number') {
-        setOpponentCurrency(receivedGameState.currency);
-      }
-
-      if (!opponentVisualStateRef.current && opponentBicycleRef.current) {
+      // Initial direct set for opponent if no visual state yet (can be removed if interpolation handles init well)
+      if (!opponentVisualStateRef.current && opponentBicycleRef.current && engineRef.current) {
         opponentVisualStateRef.current = {
           position: { ...receivedGameState.position },
           angle: receivedGameState.angle,
@@ -644,11 +535,14 @@ const GameScreen: React.FC<GameScreenProps> = ({
     return () => {
       webRTCService.setOnGameStateReceived(null);
     };
-  }, [raceOver]); // Add raceOver dependency
-    const FORCE_SCALE_FACTOR = 0.03;
-    const LOW_SPEED_THRESHOLD = 0.5;
-    const MIN_FORCE_RAMP_FACTOR = 0.1;
-    const applyPedalForce = (key: 'a' | 'd') => {
+  }, [raceOver]);
+
+  // --- Player Input Effects ---
+  useEffect(() => {
+    if (raceOver) return;
+
+    const MAX_EFFECTIVE_TIME_DIFF = 500; // Should be a const at top level
+    const applyPedalForce = (key: 'a' | 'd') => { // This function could be memoized or defined outside if it doesn't depend on too many props/state
       if (!bicycleRef.current) return;
       const currentTime = Date.now();
       const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
@@ -682,6 +576,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
       if (calculatedForceMagnitude > 0) {
         const currentSpeed = Math.abs(rearWheel.velocity.x);
         let rampUpFactor = 1.0;
+        const LOW_SPEED_THRESHOLD = 0.5; // Should be a const at top level
+        const MIN_FORCE_RAMP_FACTOR = 0.1; // Should be a const at top level
         if (currentSpeed < LOW_SPEED_THRESHOLD) {
           rampUpFactor = Math.min(1, (currentSpeed / LOW_SPEED_THRESHOLD) + MIN_FORCE_RAMP_FACTOR);
           rampUpFactor = Math.max(MIN_FORCE_RAMP_FACTOR, rampUpFactor);
@@ -693,12 +589,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
         );
       }
     };
-  useEffect(() => {
-    if (raceOver) return; // Don't attach listener if race is over
 
-    const MAX_EFFECTIVE_TIME_DIFF = 500;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (raceOver) return; // Ignore input if race is over
+      if (raceOver) return;
       const key = event.key.toLowerCase();
       if (key === 'a') {
         applyPedalForce('a');
@@ -710,75 +603,47 @@ const GameScreen: React.FC<GameScreenProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [raceOver]); // Add raceOver dependency
+  }, [raceOver]); // FORCE_SCALE_FACTOR could be a dependency if it changed, but it's a const
 
-  // Effect for time-based score increment - REMOVED as currency is now based on coin collection
-  // useEffect(() => {
-  //   const scoreInterval = setInterval(() => {
-  //     setPlayerCurrency(prevScore => prevScore + 10); // Increment score by 10 every 5 seconds
-  //   }, 5000); // 5000 milliseconds = 5 seconds
-  //
-  //   return () => clearInterval(scoreInterval); // Cleanup interval on component unmount
-  // }, []); // Empty dependency array ensures this runs once on mount
-
-  // Effect for updating display speed and player position
+  // --- HUD Update Effects ---
   useEffect(() => {
     let intervalId: number | undefined = undefined;
     if (!raceOver && bicycleRef.current) {
       const updateHudData = () => {
-        if (raceOver) { // Check again inside interval, in case raceOver changes rapidly
+        if (raceOver) {
             if(intervalId) clearInterval(intervalId);
             return;
         }
-        // Speed update logic
         if (bicycleRef.current) {
         const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
         if (rearWheel) {
           const speed = Math.abs(rearWheel.velocity.x);
-          const displayableSpeed = speed * 5; // Placeholder scaling
+          const displayableSpeed = speed * 5;
           setDisplaySpeed(displayableSpeed);
         }
       }
 
-      // Position update logic
       if (bicycleRef.current && opponentVisualStateRef.current?.position) {
         const playerFrame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
         if (playerFrame) {
           const playerX = playerFrame.position.x;
           const opponentX = opponentVisualStateRef.current.position.x;
-          // Assuming higher X means further ahead in the race
           setPlayerPosition(playerX >= opponentX ? 1 : 2);
         }
       }
     };
-
-      };
-      intervalId = window.setInterval(updateHudData, 100); // Use window.setInterval
+      intervalId = window.setInterval(updateHudData, 100);
     } else if (raceOver && intervalId) {
-        clearInterval(intervalId); // Clear interval if race ends
+        clearInterval(intervalId);
     }
 
     return () => {
         if (intervalId) clearInterval(intervalId);
     };
-    // Dependencies: Re-run if bicycleRef becomes available or if raceOver status changes.
-  }, [bicycleRef.current, raceOver]);
+  }, [bicycleRef.current, raceOver]); // opponentVisualStateRef.current could be a dependency if its change should trigger this
 
 
-  const handleSend = () => {
-    if (raceOver) return; // Prevent sending messages when race is over
-    if (message.trim()) {
-      onSendMessage(message);
-      setMessage('');
-    }
-  };
-
-  const [skyOffset, setSkyOffset] = useState(0);
-  const [mountain1Offset, setMountain1Offset] = useState(0);
-  const [mountain2Offset, setMountain2Offset] = useState(0);
-  const [mountain3Offset, setMountain3Offset] = useState(0);
-  const parallaxIntervalRef = useRef<number | null>(null); // Ref to hold parallax interval ID
-
+  // --- Visual/Animation Effects ---
   useEffect(() => {
     if (raceOver) {
       if (parallaxIntervalRef.current !== null) {
@@ -789,7 +654,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     }
 
     const scrollSpeedFactor = 0.1;
-    if (parallaxIntervalRef.current === null) { // Start interval only if not already running
+    if (parallaxIntervalRef.current === null) {
       parallaxIntervalRef.current = window.setInterval(() => {
         setSkyOffset(prev => (prev - 0.5 * scrollSpeedFactor));
         setMountain1Offset(prev => (prev - 1 * scrollSpeedFactor));
@@ -799,92 +664,26 @@ const GameScreen: React.FC<GameScreenProps> = ({
     }
 
     return () => {
-      // Cleanup is handled by the raceOver check at the start of the effect,
-      // but also good to have it here for component unmount.
       if (parallaxIntervalRef.current !== null) {
         clearInterval(parallaxIntervalRef.current);
         parallaxIntervalRef.current = null;
       }
     };
-  }, [raceOver]); // Add raceOver to control parallax
+  }, [raceOver]);
 
-  // Race End Logic
-  useEffect(() => {
-    if (raceOver || !raceStartTime || !props.onRaceEnd) return;
+  // --- Handle Send Message ---
+  const handleSend = () => {
+    if (raceOver) return;
+    if (message.trim()) {
+      onSendMessage(message);
+      setMessage('');
+    }
+  };
 
-    const timerInterval = setInterval(() => {
-      if (Date.now() - raceStartTime >= RACE_DURATION_MS) {
-        if (!raceOver) { // Ensure this block runs only once
-          setRaceOver(true);
-          console.log("Race over! Determining winner...");
-
-          // Stop Matter.js runner
-          if (runnerRef.current) {
-            Runner.stop(runnerRef.current);
-            console.log("Matter.js Runner stopped.");
-          }
-
-          // Clear physics event listeners to prevent further updates
-          if (engineRef.current) {
-            Events.off(engineRef.current, 'collisionStart');
-            Events.off(engineRef.current, 'beforeUpdate');
-            Events.off(engineRef.current, 'afterUpdate');
-            console.log("Matter.js event listeners cleared for physics updates.");
-          }
-
-          let winnerName = "Player"; // Default to player
-          const playerFrameBody = bicycleRef.current ? Composite.get(bicycleRef.current, 'frame', 'body') as Body | null : null;
-          const playerX = playerFrameBody ? playerFrameBody.position.x : 0;
-
-          // Ensure opponentVisualStateRef.current and its position property exist
-          const opponentX = opponentVisualStateRef.current?.position?.x || 0;
-
-          if (playerCurrency > opponentCurrency) {
-            winnerName = "Player";
-          } else if (opponentCurrency > playerCurrency) {
-            winnerName = "Opponent";
-          } else { // Currencies are equal, use position as tie-breaker
-            if (playerX > opponentX) {
-              winnerName = "Player";
-            } else if (opponentX > playerX) {
-              winnerName = "Opponent";
-            } else {
-              winnerName = "Player"; // Player wins in a complete tie by default
-            }
-          }
-
-          console.log(`Winner determined: ${winnerName}, Player Final Currency: ${playerCurrency}`);
-          props.onRaceEnd(winnerName, playerCurrency);
-        }
-        clearInterval(timerInterval); // Stop this interval
-      }
-    }, 1000); // Check every second
-
-    return () => clearInterval(timerInterval); // Cleanup interval
-  }, [raceStartTime, raceOver, playerCurrency, opponentCurrency, props.onRaceEnd, props]); // Added props to dependency for onRaceEnd
-
+  // --- Render ---
   return (
     <div style={{ padding: '20px', border: '1px solid green', position: 'relative' }}>
-      {raceOver && (
-        <div style={{
-          position: 'absolute',
-          top: '50%',
-          left: '50%',
-          transform: 'translate(-50%, -50%)',
-          padding: '30px',
-          backgroundColor: 'rgba(0, 0, 0, 0.85)',
-          color: 'white',
-          fontSize: '2.5em',
-          fontFamily: "'Press Start 2P', cursive", // Retro font
-          border: '3px solid #FF00FF', // Magenta border
-          borderRadius: '10px',
-          textShadow: '3px 3px #00FFFF', // Cyan shadow
-          zIndex: 1000,
-          textAlign: 'center'
-        }}>
-          Race Finished!
-        </div>
-      )}
+      <RaceEndOverlay isVisible={raceOver} />
       {/* Score Display - THIS WILL BE REPLACED/AUGMENTED BY PointsDisplay */}
       {/* <div style={{
         position: 'absolute',
@@ -905,6 +704,26 @@ const GameScreen: React.FC<GameScreenProps> = ({
       <SpeedDisplay speed={displaySpeed} />
       <PositionDisplay currentPosition={playerPosition} totalRacers={2} />
       <PointsDisplay points={playerCurrency} />
+
+      <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 100, background: 'rgba(0,0,0,0.5)', padding: '5px', borderRadius: '5px' }}>
+        <label htmlFor="volumeSlider" style={{ color: 'white', marginRight: '5px', fontFamily: "'Press Start 2P', cursive", fontSize: '0.8em' }}>Volume:</label>
+        <input
+          id="volumeSlider"
+          type="range"
+          min="0"
+          max="1"
+          step="0.01"
+          value={volume}
+          onChange={(e) => {
+            const newVolume = parseFloat(e.target.value);
+            setVolume(newVolume);
+            if (audioRef.current) {
+              audioRef.current.volume = newVolume;
+            }
+          }}
+          style={{ verticalAlign: 'middle' }}
+        />
+      </div>
 
       <h2>Game Screen</h2>
       <p>My Player ID: {playerId || 'N/A'}</p>
