@@ -1,4 +1,8 @@
 import { World, Bodies, Composite, Constraint, Body } from 'matter-js';
+import bicyclePlayer1Sprite from '../assets/bicycle_player1.png';
+import bicyclePlayer2Sprite from '../assets/bicycle_player2.png';
+import oilSlickSprite from '../assets/oil_slick.png';
+import potholeSprite from '../assets/pothole.png';
 
 /**
  * @file matterSetup.ts
@@ -11,9 +15,10 @@ import { World, Bodies, Composite, Constraint, Body } from 'matter-js';
  * Creates a bicycle composite, including wheels, frame, and axles.
  * @param x The initial x-coordinate for the center of the bicycle frame.
  * @param y The initial y-coordinate for the center of the bicycle frame.
+ * @param playerType Distinguishes between 'player1' and 'player2' for sprite selection.
  * @returns A Matter.js Composite representing the bicycle.
  */
-export const createBicycle = (x: number, y: number): Composite => {
+export const createBicycle = (x: number, y: number, playerType: 'player1' | 'player2'): Composite => {
   const group = Body.nextGroup(true); // Ensures parts of the same bicycle don't self-collide
   const wheelRadius = 20;
   const wheelGap = 50; // Distance from center of frame to center of wheels horizontally
@@ -21,15 +26,24 @@ export const createBicycle = (x: number, y: number): Composite => {
   const frameWidth = 100;
 
   // Wheels
+  const selectedSprite = playerType === 'player1' ? bicyclePlayer1Sprite : bicyclePlayer2Sprite;
+
+  // Wheels
   const wheelA = Bodies.circle(x - wheelGap, y + frameHeight / 2, wheelRadius, {
     label: 'wheelA', // Front wheel
     collisionFilter: { group: group },
     friction: 0.8,
+    render: {
+      visible: false,
+    },
   });
   const wheelB = Bodies.circle(x + wheelGap, y + frameHeight / 2, wheelRadius, {
     label: 'wheelB', // Rear wheel
     collisionFilter: { group: group },
     friction: 0.8,
+    render: {
+      visible: false,
+    },
   });
 
   // Frame
@@ -37,6 +51,13 @@ export const createBicycle = (x: number, y: number): Composite => {
     label: 'frame',
     collisionFilter: { group: group },
     density: 0.005, // Density affects mass and thus inertia
+    render: {
+      sprite: {
+        texture: selectedSprite,
+        xScale: 0.5, // Adjust as needed based on sprite dimensions vs body
+        yScale: 0.5, // Adjust as needed
+      },
+    },
   });
 
   // Axles: Constraints that connect the wheels to the frame
@@ -196,8 +217,30 @@ export const createHazards = (world: World, canvasWidth: number, canvasHeight: n
   const trackCenterY = canvasHeight / 2;
 
   const potholeRadius = 18;
-  const potholeStyle = { isStatic: true, isSensor: true, label: 'pothole', render: { fillStyle: '#FF6600' } };
-  const oilSlickStyle = { isStatic: true, isSensor: true, label: 'oilSlick', render: { fillStyle: '#6600CC' } };
+  const potholeStyle = {
+    isStatic: true,
+    isSensor: true,
+    label: 'pothole',
+    render: {
+      sprite: {
+        texture: potholeSprite,
+        xScale: 0.5, // Adjust as needed
+        yScale: 0.5, // Adjust as needed
+      },
+    },
+  };
+  const oilSlickStyle = {
+    isStatic: true,
+    isSensor: true,
+    label: 'oilSlick',
+    render: {
+      sprite: {
+        texture: oilSlickSprite,
+        xScale: 0.5, // Adjust as needed
+        yScale: 0.5, // Adjust as needed
+      },
+    },
+  };
 
   const p1x = trackCenterX + 50;
   const p1y = trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4);
