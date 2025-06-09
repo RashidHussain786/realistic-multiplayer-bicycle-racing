@@ -17,7 +17,10 @@ interface GameScreenProps {
   onDisconnect: () => void;
   onSendMessage: (message: string) => void;
   lastMessageReceived: string | null;
+  onRaceEnd: (winnerName: string, finalPlayerCurrency: number) => void; // New prop
 }
+
+const RACE_DURATION_MS = 60000; // 1 minute for the race
 
 // Function to create a bicycle composite
 const createBicycle = (x: number, y: number): Composite => {
@@ -105,6 +108,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const [displaySpeed, setDisplaySpeed] = useState(0);
   const [opponentCurrency, setOpponentCurrency] = useState(0); // Opponent's currency
   const [playerPosition, setPlayerPosition] = useState<1 | 2>(1);
+  const [raceStartTime, setRaceStartTime] = useState<number | null>(null); // For race timer
+  const [raceOver, setRaceOver] = useState(false); // To track if the race has ended
   const sceneRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const runnerRef = useRef<Runner | null>(null);
@@ -126,13 +131,28 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const TARGET_FORCE_DECAY_FACTOR = 0.95; // Decay per frame
   const MIN_APPLIED_FORCE_THRESHOLD = 0.001;
 
+  // Effect to set race start time
+  useEffect(() => {
+    setRaceStartTime(Date.now());
+  }, []);
 
   // Effect for Matter.js setup and cleanup
   useEffect(() => {
-    if (!sceneRef.current || !engineRef) { // Added !engineRef check for safety, though current is initially null
-      console.error("Scene ref is not available");
-      return;
+    if (raceOver || !sceneRef.current) {
+        if (raceOver) {
+            // Ensure Matter.js is stopped if race ends.
+            // The race end logic useEffect already handles this, but this is a safeguard.
+            if (runnerRef.current) Runner.stop(runnerRef.current);
+            if (engineRef.current) {
+                Events.off(engineRef.current, 'collisionStart');
+                Events.off(engineRef.current, 'beforeUpdate');
+                Events.off(engineRef.current, 'afterUpdate');
+            }
+        }
+        console.log("Matter.js setup skipped or cleaned up: raceOver is", raceOver, "or sceneRef not current.");
+        return;
     }
+    // Removed !engineRef check as it's a ref object, not its current value.
 
     // Create engine
     const engine = Engine.create();
@@ -356,7 +376,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     };
 
     const handleCollision = (event: Matter.IEventCollision<Engine>) => {
-      if (!bicycleRef.current || !engineRef.current) return;
+      if (raceOver || !bicycleRef.current || !engineRef.current) return; // Check raceOver
       const playerParts = Composite.allBodies(bicycleRef.current);
       const pairs = event.pairs;
       collectedCoinIdsRef.current.clear(); // Clear at the start of new collision event processing
@@ -473,6 +493,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
     const RENDER_DELAY = 100;
     const gameLoop = () => {
+      if (raceOver) return; // Check raceOver
       const targetForce = targetForceRef.current;
       const currentAppliedForce = currentAppliedForceRef.current;
       const newAppliedForce = currentAppliedForce + (targetForce - currentAppliedForce) * FORCE_SMOOTHING_FACTOR;
@@ -551,6 +572,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     };
     Events.on(engine, 'beforeUpdate', gameLoop);
     const handlePlayerStateSend = () => {
+      if (raceOver || !bicycleRef.current || !engineRef.current) return; // Check raceOver
       if (bicycleRef.current && engineRef.current) {
         const frame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
         const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
@@ -583,10 +605,16 @@ const GameScreen: React.FC<GameScreenProps> = ({
         render.canvas.remove();
       }
     };
-  }, []);
+  }, [raceOver]); // Add raceOver: if it becomes true, this effect will re-run and stop/cleanup Matter.js
+
   useEffect(() => {
+    if (raceOver) {
+      webRTCService.setOnGameStateReceived(null); // Stop listening to opponent updates
+      return;
+    }
     const BUFFER_SIZE_LIMIT = 20;
-    webRTCService.setOnGameStateReceived((receivedGameState: GameState) => { // Renamed to receivedGameState
+    webRTCService.setOnGameStateReceived((receivedGameState: GameState) => {
+      if (raceOver) return; // Extra check for safety
       const receivedTime = performance.now();
       opponentStateBufferRef.current.push({ state: receivedGameState, receivedTime });
       if (opponentStateBufferRef.current.length > BUFFER_SIZE_LIMIT) {
@@ -616,10 +644,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     return () => {
       webRTCService.setOnGameStateReceived(null);
     };
-  }, []); // Removed opponentCurrency from dependencies, direct state update is fine.
-
-  useEffect(() => {
-    const MAX_EFFECTIVE_TIME_DIFF = 500;
+  }, [raceOver]); // Add raceOver dependency
     const FORCE_SCALE_FACTOR = 0.03;
     const LOW_SPEED_THRESHOLD = 0.5;
     const MIN_FORCE_RAMP_FACTOR = 0.1;
@@ -668,7 +693,12 @@ const GameScreen: React.FC<GameScreenProps> = ({
         );
       }
     };
+  useEffect(() => {
+    if (raceOver) return; // Don't attach listener if race is over
+
+    const MAX_EFFECTIVE_TIME_DIFF = 500;
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (raceOver) return; // Ignore input if race is over
       const key = event.key.toLowerCase();
       if (key === 'a') {
         applyPedalForce('a');
@@ -680,7 +710,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []); // Empty dependency array to run once on mount and clean up on unmount
+  }, [raceOver]); // Add raceOver dependency
 
   // Effect for time-based score increment - REMOVED as currency is now based on coin collection
   // useEffect(() => {
@@ -693,14 +723,15 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
   // Effect for updating display speed and player position
   useEffect(() => {
-    if (!bicycleRef.current) {
-      console.log("Bicycle ref not yet available for HUD updates.");
-      return;
-    }
-
-    const updateHudData = () => {
-      // Speed update logic
-      if (bicycleRef.current) {
+    let intervalId: number | undefined = undefined;
+    if (!raceOver && bicycleRef.current) {
+      const updateHudData = () => {
+        if (raceOver) { // Check again inside interval, in case raceOver changes rapidly
+            if(intervalId) clearInterval(intervalId);
+            return;
+        }
+        // Speed update logic
+        if (bicycleRef.current) {
         const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
         if (rearWheel) {
           const speed = Math.abs(rearWheel.velocity.x);
@@ -721,16 +752,21 @@ const GameScreen: React.FC<GameScreenProps> = ({
       }
     };
 
-    const intervalId = setInterval(updateHudData, 100); // Update HUD data every 100ms
+      };
+      intervalId = window.setInterval(updateHudData, 100); // Use window.setInterval
+    } else if (raceOver && intervalId) {
+        clearInterval(intervalId); // Clear interval if race ends
+    }
 
-    return () => clearInterval(intervalId);
-    // Dependencies: bicycleRef.current being set is the main trigger.
-    // opponentVisualStateRef.current is a ref, so its changes won't trigger this useEffect directly.
-    // The interval ensures periodic checks.
-  }, [bicycleRef.current]); // Re-run if bicycleRef itself changes
+    return () => {
+        if (intervalId) clearInterval(intervalId);
+    };
+    // Dependencies: Re-run if bicycleRef becomes available or if raceOver status changes.
+  }, [bicycleRef.current, raceOver]);
 
 
   const handleSend = () => {
+    if (raceOver) return; // Prevent sending messages when race is over
     if (message.trim()) {
       onSendMessage(message);
       setMessage('');
@@ -741,20 +777,114 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const [mountain1Offset, setMountain1Offset] = useState(0);
   const [mountain2Offset, setMountain2Offset] = useState(0);
   const [mountain3Offset, setMountain3Offset] = useState(0);
+  const parallaxIntervalRef = useRef<number | null>(null); // Ref to hold parallax interval ID
 
   useEffect(() => {
+    if (raceOver) {
+      if (parallaxIntervalRef.current !== null) {
+        clearInterval(parallaxIntervalRef.current);
+        parallaxIntervalRef.current = null;
+      }
+      return;
+    }
+
     const scrollSpeedFactor = 0.1;
-    const interval = setInterval(() => {
-      setSkyOffset(prev => (prev - 0.5 * scrollSpeedFactor));
-      setMountain1Offset(prev => (prev - 1 * scrollSpeedFactor));
-      setMountain2Offset(prev => (prev - 2 * scrollSpeedFactor));
-      setMountain3Offset(prev => (prev - 3 * scrollSpeedFactor));
-    }, 16);
-    return () => clearInterval(interval);
-  }, []);
+    if (parallaxIntervalRef.current === null) { // Start interval only if not already running
+      parallaxIntervalRef.current = window.setInterval(() => {
+        setSkyOffset(prev => (prev - 0.5 * scrollSpeedFactor));
+        setMountain1Offset(prev => (prev - 1 * scrollSpeedFactor));
+        setMountain2Offset(prev => (prev - 2 * scrollSpeedFactor));
+        setMountain3Offset(prev => (prev - 3 * scrollSpeedFactor));
+      }, 16);
+    }
+
+    return () => {
+      // Cleanup is handled by the raceOver check at the start of the effect,
+      // but also good to have it here for component unmount.
+      if (parallaxIntervalRef.current !== null) {
+        clearInterval(parallaxIntervalRef.current);
+        parallaxIntervalRef.current = null;
+      }
+    };
+  }, [raceOver]); // Add raceOver to control parallax
+
+  // Race End Logic
+  useEffect(() => {
+    if (raceOver || !raceStartTime || !props.onRaceEnd) return;
+
+    const timerInterval = setInterval(() => {
+      if (Date.now() - raceStartTime >= RACE_DURATION_MS) {
+        if (!raceOver) { // Ensure this block runs only once
+          setRaceOver(true);
+          console.log("Race over! Determining winner...");
+
+          // Stop Matter.js runner
+          if (runnerRef.current) {
+            Runner.stop(runnerRef.current);
+            console.log("Matter.js Runner stopped.");
+          }
+
+          // Clear physics event listeners to prevent further updates
+          if (engineRef.current) {
+            Events.off(engineRef.current, 'collisionStart');
+            Events.off(engineRef.current, 'beforeUpdate');
+            Events.off(engineRef.current, 'afterUpdate');
+            console.log("Matter.js event listeners cleared for physics updates.");
+          }
+
+          let winnerName = "Player"; // Default to player
+          const playerFrameBody = bicycleRef.current ? Composite.get(bicycleRef.current, 'frame', 'body') as Body | null : null;
+          const playerX = playerFrameBody ? playerFrameBody.position.x : 0;
+
+          // Ensure opponentVisualStateRef.current and its position property exist
+          const opponentX = opponentVisualStateRef.current?.position?.x || 0;
+
+          if (playerCurrency > opponentCurrency) {
+            winnerName = "Player";
+          } else if (opponentCurrency > playerCurrency) {
+            winnerName = "Opponent";
+          } else { // Currencies are equal, use position as tie-breaker
+            if (playerX > opponentX) {
+              winnerName = "Player";
+            } else if (opponentX > playerX) {
+              winnerName = "Opponent";
+            } else {
+              winnerName = "Player"; // Player wins in a complete tie by default
+            }
+          }
+
+          console.log(`Winner determined: ${winnerName}, Player Final Currency: ${playerCurrency}`);
+          props.onRaceEnd(winnerName, playerCurrency);
+        }
+        clearInterval(timerInterval); // Stop this interval
+      }
+    }, 1000); // Check every second
+
+    return () => clearInterval(timerInterval); // Cleanup interval
+  }, [raceStartTime, raceOver, playerCurrency, opponentCurrency, props.onRaceEnd, props]); // Added props to dependency for onRaceEnd
 
   return (
-    <div style={{ padding: '20px', border: '1px solid green', position: 'relative' }}> {/* Added position: 'relative' */}
+    <div style={{ padding: '20px', border: '1px solid green', position: 'relative' }}>
+      {raceOver && (
+        <div style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          padding: '30px',
+          backgroundColor: 'rgba(0, 0, 0, 0.85)',
+          color: 'white',
+          fontSize: '2.5em',
+          fontFamily: "'Press Start 2P', cursive", // Retro font
+          border: '3px solid #FF00FF', // Magenta border
+          borderRadius: '10px',
+          textShadow: '3px 3px #00FFFF', // Cyan shadow
+          zIndex: 1000,
+          textAlign: 'center'
+        }}>
+          Race Finished!
+        </div>
+      )}
       {/* Score Display - THIS WILL BE REPLACED/AUGMENTED BY PointsDisplay */}
       {/* <div style={{
         position: 'absolute',
