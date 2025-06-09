@@ -1,4 +1,4 @@
-import { GameState } from '../types/GameState';
+import type { GameState } from '../types/GameState';
 
 /**
  * @file opponentSync.ts

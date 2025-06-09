@@ -1,4 +1,4 @@
-import { useEffect, useRef, RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { Engine, Render, Runner, Composite } from 'matter-js'; // World removed as Composite.clear is used
 
 /**
@@ -8,7 +8,7 @@ import { Engine, Render, Runner, Composite } from 'matter-js'; // World removed 
 
 interface UseMatterJSProps {
   /** Ref to the HTMLDivElement where the Matter.js canvas will be rendered. */
-  sceneRef: RefObject<HTMLDivElement>;
+  sceneRef: RefObject<HTMLDivElement | null>;
   /** Optional width for the Matter.js canvas. Defaults to 800. */
   canvasWidth?: number;
   /** Optional height for the Matter.js canvas. Defaults to 600. */

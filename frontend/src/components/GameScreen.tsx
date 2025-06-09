@@ -10,7 +10,7 @@ import SpeedDisplay from './HUD/SpeedDisplay';
 import PositionDisplay from './HUD/PositionDisplay';
 import PointsDisplay from './HUD/PointsDisplay';
 import { Engine, Runner, World, Bodies, Composite, Constraint, Body, Events } from 'matter-js'; // Removed Render
-import { GameState } from '../types/GameState'; // Import GameState
+import type { GameState } from '../types/GameState'; // Import GameState
 import webRTCService from '../services/WebRTCService'; // Import webRTCService
 import useMatterJS from '../hooks/useMatterJS'; // Import the custom hook
 import { createBicycle, createCoin, createTrackWalls, createHazards } from '../utils/matterSetup'; // Import setup functions
@@ -91,6 +91,12 @@ const GameScreen: React.FC<GameScreenProps> = ({
   // --- UI Interaction State ---
   const [message, setMessage] = useState(''); // For chat input
 
+  // --- Parallax State ---
+  const [skyOffset, setSkyOffset] = useState(0);
+  const [mountain1Offset, setMountain1Offset] = useState(0);
+  const [mountain2Offset, setMountain2Offset] = useState(0);
+  const [mountain3Offset, setMountain3Offset] = useState(0);
+
   // --- Audio State ---
   const [volume, setVolume] = useState(0.5);
 
@@ -119,6 +125,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
   // --- Constants ---
   const COIN_VALUE = 10;
+  const FORCE_SCALE_FACTOR = 0.005; // Added constant
   const FORCE_SMOOTHING_FACTOR = 0.1;
   const TARGET_FORCE_DECAY_FACTOR = 0.95;
   const MIN_APPLIED_FORCE_THRESHOLD = 0.001;
@@ -135,7 +142,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
   // Race End Logic
   useEffect(() => {
-    if (raceOver || !raceStartTime || !props.onRaceEnd) return;
+    // Assuming onRaceEnd is passed directly in GameScreenProps and destructured
+    if (raceOver || !raceStartTime || !onRaceEnd) return;
 
     const timerInterval = setInterval(() => {
       if (Date.now() - raceStartTime >= RACE_DURATION_MS) {
@@ -169,14 +177,14 @@ const GameScreen: React.FC<GameScreenProps> = ({
             }
           }
           console.log(`Winner determined: ${winnerName}, Player Final Currency: ${playerCurrency}`);
-          props.onRaceEnd(winnerName, playerCurrency);
+          onRaceEnd(winnerName, playerCurrency); // Use destructured onRaceEnd
         }
         clearInterval(timerInterval);
       }
     }, 1000);
 
     return () => clearInterval(timerInterval);
-  }, [raceStartTime, raceOver, playerCurrency, opponentCurrency, props.onRaceEnd, props]);
+  }, [raceStartTime, raceOver, playerCurrency, opponentCurrency, onRaceEnd]); // Use onRaceEnd in deps
 
 
   // --- Audio Effects ---
@@ -287,87 +295,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
       collectedCoinIdsRef.current.add(coinBody.id);
     };
 
-    const handleCollision = (event: Matter.IEventCollision<Engine>) => {
-      if (raceOver || !bicycleRef.current || !engineRef.current) return;
-      const playerParts = Composite.allBodies(bicycleRef.current);
-      const pairs = event.pairs;
-      collectedCoinIdsRef.current.clear();
-
-      for (let i = 0; i < pairs.length; i++) {
-        const pair = pairs[i];
-        let playerPart = null;
-        let coinBody = null;
-
-        if (playerParts.some(part => part.id === pair.bodyA.id) && pair.bodyB.label === 'coin') {
-          playerPart = pair.bodyA;
-          coinBody = pair.bodyB;
-        } else if (playerParts.some(part => part.id === pair.bodyB.id) && pair.bodyA.label === 'coin') {
-          playerPart = pair.bodyB;
-          coinBody = pair.bodyA;
-        }
-
-        if (playerPart && coinBody && !collectedCoinIdsRef.current.has(coinBody.id)) {
-          console.log('Coin collected:', coinBody.id);
-          setPlayerCurrency(prevCurrency => prevCurrency + COIN_VALUE);
-
-          const sound = new Audio(coinCollectSound);
-          sound.volume = volume;
-          sound.play().catch(e => console.error("Error playing coin sound:", e));
-          removeCoin(coinBody);
-        } else {
-          let playerBodyForHazard = null;
-          let hazardBody = null;
-          const isBodyAPlayerPart = playerParts.some(part => part.id === pair.bodyA.id);
-          const isBodyBPlayerPart = playerParts.some(part => part.id === pair.bodyB.id);
-
-          if (isBodyAPlayerPart && (pair.bodyB.label === 'pothole' || pair.bodyB.label === 'oilSlick')) {
-            playerBodyForHazard = pair.bodyA;
-            hazardBody = pair.bodyB;
-          } else if (isBodyBPlayerPart && (pair.bodyA.label === 'pothole' || pair.bodyA.label === 'oilSlick')) {
-            playerBodyForHazard = pair.bodyB;
-            hazardBody = pair.bodyA;
-          }
-
-          if (playerBodyForHazard && hazardBody) {
-            if (hazardBody.label === 'pothole') {
-              const now = Date.now();
-              const POTHOLE_COOLDOWN = 1000;
-              if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
-                console.log('Applying pothole effect...');
-                lastPotholeCollisionTimeRef.current = now;
-                const playerBicycleParts = Composite.allBodies(bicycleRef.current!);
-                playerBicycleParts.forEach(part => {
-                  Body.setVelocity(part, {
-                    x: part.velocity.x * 0.5,
-                    y: part.velocity.y * 0.5
-                  });
-                });
-                const rearWheel = Composite.get(bicycleRef.current!, 'wheelB', 'body') as Body | null;
-                const frontWheel = Composite.get(bicycleRef.current!, 'wheelA', 'body') as Body | null;
-                if (rearWheel) Body.setAngularVelocity(rearWheel, rearWheel.angularVelocity * 0.5);
-                if (frontWheel) Body.setAngularVelocity(frontWheel, frontWheel.angularVelocity * 0.5);
-              }
-            } else if (hazardBody.label === 'oilSlick') {
-              const now = Date.now();
-              const OIL_SLICK_COOLDOWN = 1500;
-              if (now - lastOilSlickCollisionTimeRef.current > OIL_SLICK_COOLDOWN) {
-                console.log('Applying oil slick effect...');
-                lastOilSlickCollisionTimeRef.current = now;
-                const playerFrame = Composite.get(bicycleRef.current!, 'frame', 'body') as Body | null;
-                const forceMagnitude = 0.0025;
-                const direction = Math.random() < 0.5 ? -1 : 1;
-                if (playerFrame) {
-                  Body.applyForce(playerFrame, playerFrame.position, { x: forceMagnitude * direction, y: 0 });
-                }
-              }
-            }
-          }
-        }
-      }
-    };
-
     // --- Collision Handler Helper Functions ---
     // (Defined within useEffect to close over necessary state/refs like volume, setPlayerCurrency, COIN_VALUE, bicycleRef, etc.)
+    // The first, older handleCollision function block has been removed.
 
     const processPlayerCoinCollision = (coinBody: Body) => {
       if (!collectedCoinIdsRef.current.has(coinBody.id)) {

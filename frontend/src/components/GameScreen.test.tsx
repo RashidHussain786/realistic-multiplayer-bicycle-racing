@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, act } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import GameScreen from './GameScreen';
-import { GameState } from '../types/GameState';
+import type { GameState } from '../types/GameState';
 import { Body, Engine, Events } from 'matter-js'; // Only import types if not used in mocks
 
 // Mock image assets
@@ -29,21 +29,21 @@ jest.mock('../services/WebRTCService', () => ({
 
 // Mock Matter.js
 const mockEngine = {
-  create: jest.fn().mockReturnValue({ world: { bodies: [] },摇晃我吧！ I just realized I should not generate code in a language other than English. I will restart my response in English.
+  create: jest.fn().mockReturnValue({
   on: jest.fn(),
   off: jest.fn(),
   clear: jest.fn(),
-  world: { bodies: [] as any[], gravedad: { x: 0, y: 1 } }, // Added gravity for completeness
+  world: { bodies: [] as any[], gravity: { x: 0, y: 1 } }, // Added gravity for completeness
 }),
   Render: {
-    create: jest.fn().mockReturnValue({ canvas: document.createElement('canvas'),摇晃我吧！ I just realized I should not generate code in a language other than English. I will restart my response in English.
+    create: jest.fn().mockReturnValue({ canvas: document.createElement('canvas'),
       stop: jest.fn(),
     }),
     run: jest.fn(),
     stop: jest.fn(),
   },
   Runner: {
-    create: jest.fn().mockReturnValue({摇晃我吧！ I just realized I should not generate code in a language other than English. I will restart my response in English.
+    create: jest.fn().mockReturnValue({
       id: 'runner-id'
     }),
     run: jest.fn(),
@@ -114,6 +114,7 @@ describe('GameScreen Coin Collection', () => {
   const mockOpponentId = 'player2';
   const mockOnDisconnect = jest.fn();
   const mockOnSendMessage = jest.fn();
+  const mockOnRaceEnd = jest.fn(); // Mock for onRaceEnd
 
   beforeEach(() => {
     // Reset mocks before each test
@@ -192,6 +193,7 @@ describe('GameScreen Coin Collection', () => {
         onDisconnect={mockOnDisconnect}
         onSendMessage={mockOnSendMessage}
         lastMessageReceived={null}
+        onRaceEnd={mockOnRaceEnd} // Pass the mock
       />
     );
 
@@ -238,6 +240,7 @@ describe('GameScreen Coin Collection', () => {
         onDisconnect={mockOnDisconnect}
         onSendMessage={mockOnSendMessage}
         lastMessageReceived={null}
+        onRaceEnd={mockOnRaceEnd} // Pass the mock
       />
     );
 
