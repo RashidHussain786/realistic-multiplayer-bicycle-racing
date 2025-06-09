@@ -75,6 +75,21 @@ const createBicycle = (x: number, y: number): Composite => {
   return bicycleComposite;
 };
 
+// Function to create a coin body
+const createCoin = (x: number, y: number): Body => {
+  const coinRadius = 10; // Small radius for the coin
+  const coin = Bodies.circle(x, y, coinRadius, {
+    isStatic: true, // Coins don't move on their own
+    isSensor: true, // Coins don't cause physical collisions, only trigger events
+    label: 'coin',
+    render: {
+      fillStyle: '#FFD700', // Gold color for the coin placeholder
+      // TODO: Replace this with a proper coin sprite
+    },
+  });
+  return coin;
+};
+
 
 const GameScreen: React.FC<GameScreenProps> = ({
   opponentId,
@@ -84,8 +99,11 @@ const GameScreen: React.FC<GameScreenProps> = ({
   lastMessageReceived,
 }) => {
   const [message, setMessage] = useState('');
-  const [score, setScore] = useState(0); // Basic score state
+  const [playerCurrency, setPlayerCurrency] = useState(0); // Player's currency
+  const [coins, setCoins] = useState<Body[]>([]); // Array to store coin bodies
+  const COIN_VALUE = 10;
   const [displaySpeed, setDisplaySpeed] = useState(0);
+  const [opponentCurrency, setOpponentCurrency] = useState(0); // Opponent's currency
   const [playerPosition, setPlayerPosition] = useState<1 | 2>(1);
   const sceneRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
@@ -100,6 +118,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const currentAppliedForceRef = useRef<number>(0);
   const lastPotholeCollisionTimeRef = useRef<number>(0); // For pothole effect cooldown
   const lastOilSlickCollisionTimeRef = useRef<number>(0); // For oil slick effect cooldown
+  const collectedCoinIdsRef = useRef<Set<number>>(new Set()); // Keep track of collected coin IDs in the current collision event processing cycle
+
 
   // Constants for physics behavior
   const FORCE_SMOOTHING_FACTOR = 0.1;
@@ -109,7 +129,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
   // Effect for Matter.js setup and cleanup
   useEffect(() => {
-    if (!sceneRef.current) {
+    if (!sceneRef.current || !engineRef) { // Added !engineRef check for safety, though current is initially null
       console.error("Scene ref is not available");
       return;
     }
@@ -272,6 +292,29 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
     World.add(world, [pothole1, pothole2, oilSlick1, oilSlick2]);
 
+    // Create and add a coin (placeholder)
+    // TODO: Replace this with proper coin sprite and potentially more sophisticated placement logic
+    // const coinX = trackCenterX + 100; // Example position
+    // const coinY = trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4); // Example position (on the track)
+    // const coinInstance = createCoin(coinX, coinY);
+    // World.add(world, coinInstance);
+
+    const coinPositions = [
+      { x: trackCenterX + 100, y: trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4) + 10 }, // Adjusted Y slightly
+      { x: trackCenterX - 150, y: trackCenterY + (trackInnerHeight / 2) + ((trackOuterHeight - trackInnerHeight) / 4) - 10 }, // Adjusted Y slightly
+      { x: trackCenterX, y: trackCenterY + (trackOuterHeight / 2) - wallThickness - 30 }, // Near bottom middle of track
+      { x: trackCenterX + (trackOuterWidth / 2) - wallThickness - 80, y: trackCenterY + 50 }, // Right side, mid height on outer part of track curve
+      { x: trackCenterX - (trackOuterWidth / 2) + wallThickness + 80, y: trackCenterY - 50 }, // Left side, mid height on outer part of track curve
+    ];
+
+    const createdCoins: Body[] = [];
+    coinPositions.forEach(pos => {
+      const newCoin = createCoin(pos.x, pos.y);
+      World.add(world, newCoin);
+      createdCoins.push(newCoin);
+    });
+    setCoins(createdCoins);
+
     const playerStartX = trackCenterX;
     const playerStartY = trackCenterY - trackOuterHeight / 2 + wallThickness + 50;
     const playerBicycleInstance = createBicycle(playerStartX, playerStartY);
@@ -302,26 +345,97 @@ const GameScreen: React.FC<GameScreenProps> = ({
     Runner.run(runner, engine);
     Render.run(render);
 
+    // Function to remove a coin
+    const removeCoin = (coinBody: Body) => {
+      if (engineRef.current && engineRef.current.world) {
+        World.remove(engineRef.current.world, coinBody);
+      }
+      setCoins(prevCoins => prevCoins.filter(c => c.id !== coinBody.id));
+      // Add to collected set to prevent re-processing if somehow still in collision pairs
+      collectedCoinIdsRef.current.add(coinBody.id);
+    };
+
     const handleCollision = (event: Matter.IEventCollision<Engine>) => {
-      if (!bicycleRef.current) return;
+      if (!bicycleRef.current || !engineRef.current) return;
       const playerParts = Composite.allBodies(bicycleRef.current);
       const pairs = event.pairs;
+      collectedCoinIdsRef.current.clear(); // Clear at the start of new collision event processing
+
       for (let i = 0; i < pairs.length; i++) {
         const pair = pairs[i];
-        let playerBody = null;
-        let hazardBody = null;
-        const isBodyAPlayerPart = playerParts.some(part => part.id === pair.bodyA.id);
-        const isBodyBPlayerPart = playerParts.some(part => part.id === pair.bodyB.id);
-        if (isBodyAPlayerPart && (pair.bodyB.label === 'pothole' || pair.bodyB.label === 'oilSlick')) {
-          playerBody = pair.bodyA;
-          hazardBody = pair.bodyB;
-        } else if (isBodyBPlayerPart && (pair.bodyA.label === 'pothole' || pair.bodyA.label === 'oilSlick')) {
-          playerBody = pair.bodyB;
-          hazardBody = pair.bodyA;
+
+        // Check for player-coin collision
+        let playerPart = null;
+        let coinBody = null;
+
+        if (playerParts.some(part => part.id === pair.bodyA.id) && pair.bodyB.label === 'coin') {
+          playerPart = pair.bodyA;
+          coinBody = pair.bodyB;
+        } else if (playerParts.some(part => part.id === pair.bodyB.id) && pair.bodyA.label === 'coin') {
+          playerPart = pair.bodyB;
+          coinBody = pair.bodyA;
         }
-        if (playerBody && hazardBody) {
-          if (hazardBody.label === 'pothole') {
-            const now = Date.now();
+
+        if (playerPart && coinBody && !collectedCoinIdsRef.current.has(coinBody.id)) {
+          console.log('Coin collected:', coinBody.id);
+          setPlayerCurrency(prevCurrency => prevCurrency + COIN_VALUE);
+          removeCoin(coinBody);
+          // No need to add to collectedCoinIdsRef.current here, removeCoin does it.
+        } else {
+          // Check for player-hazard collision (original logic)
+          let playerBodyForHazard = null; // Renamed to avoid conflict
+          let hazardBody = null;
+          const isBodyAPlayerPart = playerParts.some(part => part.id === pair.bodyA.id);
+          const isBodyBPlayerPart = playerParts.some(part => part.id === pair.bodyB.id);
+
+          if (isBodyAPlayerPart && (pair.bodyB.label === 'pothole' || pair.bodyB.label === 'oilSlick')) {
+            playerBodyForHazard = pair.bodyA;
+            hazardBody = pair.bodyB;
+          } else if (isBodyBPlayerPart && (pair.bodyA.label === 'pothole' || pair.bodyA.label === 'oilSlick')) {
+            playerBodyForHazard = pair.bodyB;
+            hazardBody = pair.bodyA;
+          }
+
+          if (playerBodyForHazard && hazardBody) {
+            if (hazardBody.label === 'pothole') {
+              const now = Date.now();
+              const POTHOLE_COOLDOWN = 1000; // Define POTHOLE_COOLDOWN if not already
+              if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
+                console.log('Applying pothole effect...');
+                lastPotholeCollisionTimeRef.current = now;
+                const playerBicycleParts = Composite.allBodies(bicycleRef.current!);
+                playerBicycleParts.forEach(part => {
+                  Body.setVelocity(part, {
+                    x: part.velocity.x * 0.5,
+                    y: part.velocity.y * 0.5
+                  });
+                });
+                const rearWheel = Composite.get(bicycleRef.current!, 'wheelB', 'body') as Body | null;
+                const frontWheel = Composite.get(bicycleRef.current!, 'wheelA', 'body') as Body | null;
+                if (rearWheel) Body.setAngularVelocity(rearWheel, rearWheel.angularVelocity * 0.5);
+                if (frontWheel) Body.setAngularVelocity(frontWheel, frontWheel.angularVelocity * 0.5);
+              }
+            } else if (hazardBody.label === 'oilSlick') {
+              const now = Date.now();
+              const OIL_SLICK_COOLDOWN = 1500; // Define OIL_SLICK_COOLDOWN if not already
+              if (now - lastOilSlickCollisionTimeRef.current > OIL_SLICK_COOLDOWN) {
+                console.log('Applying oil slick effect...');
+                lastOilSlickCollisionTimeRef.current = now;
+                const playerFrame = Composite.get(bicycleRef.current!, 'frame', 'body') as Body | null;
+                const forceMagnitude = 0.0025;
+                const direction = Math.random() < 0.5 ? -1 : 1;
+                if (playerFrame) {
+                  Body.applyForce(playerFrame, playerFrame.position, { x: forceMagnitude * direction, y: 0 });
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+    Events.on(engine, 'collisionStart', handleCollision);
+
+    const RENDER_DELAY = 100;
             const POTHOLE_COOLDOWN = 1000;
             if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
               console.log('Applying pothole effect...');
@@ -445,6 +559,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
             position: { x: frame.position.x, y: frame.position.y },
             angle: frame.angle,
             wheelSpeed: rearWheel.angularVelocity,
+            currency: playerCurrency, // Add player currency to game state
             timestamp: performance.now(),
           };
           webRTCService.sendGameState(gameState);
@@ -471,31 +586,38 @@ const GameScreen: React.FC<GameScreenProps> = ({
   }, []);
   useEffect(() => {
     const BUFFER_SIZE_LIMIT = 20;
-    webRTCService.setOnGameStateReceived((gameState: GameState) => {
+    webRTCService.setOnGameStateReceived((receivedGameState: GameState) => { // Renamed to receivedGameState
       const receivedTime = performance.now();
-      opponentStateBufferRef.current.push({ state: gameState, receivedTime });
+      opponentStateBufferRef.current.push({ state: receivedGameState, receivedTime });
       if (opponentStateBufferRef.current.length > BUFFER_SIZE_LIMIT) {
         opponentStateBufferRef.current.shift();
       }
+
+      // Update opponent currency if present in the received state
+      if (typeof receivedGameState.currency === 'number') {
+        setOpponentCurrency(receivedGameState.currency);
+      }
+
       if (!opponentVisualStateRef.current && opponentBicycleRef.current) {
         opponentVisualStateRef.current = {
-          position: { ...gameState.position },
-          angle: gameState.angle,
-          wheelSpeed: gameState.wheelSpeed,
+          position: { ...receivedGameState.position },
+          angle: receivedGameState.angle,
+          wheelSpeed: receivedGameState.wheelSpeed,
         };
         const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
         const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
         if (opponentFrame && opponentRearWheel) {
-          Body.setPosition(opponentFrame, gameState.position);
-          Body.setAngle(opponentFrame, gameState.angle);
-          Body.setAngularVelocity(opponentRearWheel, gameState.wheelSpeed);
+          Body.setPosition(opponentFrame, receivedGameState.position);
+          Body.setAngle(opponentFrame, receivedGameState.angle);
+          Body.setAngularVelocity(opponentRearWheel, receivedGameState.wheelSpeed);
         }
       }
     });
     return () => {
       webRTCService.setOnGameStateReceived(null);
     };
-  }, []);
+  }, []); // Removed opponentCurrency from dependencies, direct state update is fine.
+
   useEffect(() => {
     const MAX_EFFECTIVE_TIME_DIFF = 500;
     const FORCE_SCALE_FACTOR = 0.03;
@@ -560,14 +682,14 @@ const GameScreen: React.FC<GameScreenProps> = ({
     };
   }, []); // Empty dependency array to run once on mount and clean up on unmount
 
-  // Effect for time-based score increment
-  useEffect(() => {
-    const scoreInterval = setInterval(() => {
-      setScore(prevScore => prevScore + 10); // Increment score by 10 every 5 seconds
-    }, 5000); // 5000 milliseconds = 5 seconds
-
-    return () => clearInterval(scoreInterval); // Cleanup interval on component unmount
-  }, []); // Empty dependency array ensures this runs once on mount
+  // Effect for time-based score increment - REMOVED as currency is now based on coin collection
+  // useEffect(() => {
+  //   const scoreInterval = setInterval(() => {
+  //     setPlayerCurrency(prevScore => prevScore + 10); // Increment score by 10 every 5 seconds
+  //   }, 5000); // 5000 milliseconds = 5 seconds
+  //
+  //   return () => clearInterval(scoreInterval); // Cleanup interval on component unmount
+  // }, []); // Empty dependency array ensures this runs once on mount
 
   // Effect for updating display speed and player position
   useEffect(() => {
@@ -652,7 +774,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
       <SpeedDisplay speed={displaySpeed} />
       <PositionDisplay currentPosition={playerPosition} totalRacers={2} />
-      <PointsDisplay points={score} />
+      <PointsDisplay points={playerCurrency} />
 
       <h2>Game Screen</h2>
       <p>My Player ID: {playerId || 'N/A'}</p>
