@@ -2,9 +2,11 @@ import skyBackground from '../assets/sky_background.png';
 import mountainLayer1 from '../assets/mountain_layer_1.png';
 import mountainLayer2 from '../assets/mountain_layer_2.png';
 import mountainLayer3 from '../assets/mountain_layer_3.png';
-import { useState, useEffect, useRef } from 'react'; // Ensure useState, useEffect, useRef are imported
 // frontend/src/components/GameScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
+import SpeedDisplay from './HUD/SpeedDisplay';
+import PositionDisplay from './HUD/PositionDisplay';
+import PointsDisplay from './HUD/PointsDisplay';
 import { Engine, Render, Runner, World, Bodies, Composite, Constraint, Body, Events } from 'matter-js';
 import { GameState } from '../types/GameState'; // Import GameState
 import webRTCService from '../services/WebRTCService'; // Import webRTCService
@@ -83,7 +85,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
 }) => {
   const [message, setMessage] = useState('');
   const [score, setScore] = useState(0); // Basic score state
-  // TODO: Add logic to update score based on game events
+  const [displaySpeed, setDisplaySpeed] = useState(0);
+  const [playerPosition, setPlayerPosition] = useState<1 | 2>(1);
   const sceneRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const runnerRef = useRef<Runner | null>(null);
@@ -566,6 +569,45 @@ const GameScreen: React.FC<GameScreenProps> = ({
     return () => clearInterval(scoreInterval); // Cleanup interval on component unmount
   }, []); // Empty dependency array ensures this runs once on mount
 
+  // Effect for updating display speed and player position
+  useEffect(() => {
+    if (!bicycleRef.current) {
+      console.log("Bicycle ref not yet available for HUD updates.");
+      return;
+    }
+
+    const updateHudData = () => {
+      // Speed update logic
+      if (bicycleRef.current) {
+        const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+        if (rearWheel) {
+          const speed = Math.abs(rearWheel.velocity.x);
+          const displayableSpeed = speed * 5; // Placeholder scaling
+          setDisplaySpeed(displayableSpeed);
+        }
+      }
+
+      // Position update logic
+      if (bicycleRef.current && opponentVisualStateRef.current?.position) {
+        const playerFrame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
+        if (playerFrame) {
+          const playerX = playerFrame.position.x;
+          const opponentX = opponentVisualStateRef.current.position.x;
+          // Assuming higher X means further ahead in the race
+          setPlayerPosition(playerX >= opponentX ? 1 : 2);
+        }
+      }
+    };
+
+    const intervalId = setInterval(updateHudData, 100); // Update HUD data every 100ms
+
+    return () => clearInterval(intervalId);
+    // Dependencies: bicycleRef.current being set is the main trigger.
+    // opponentVisualStateRef.current is a ref, so its changes won't trigger this useEffect directly.
+    // The interval ensures periodic checks.
+  }, [bicycleRef.current]); // Re-run if bicycleRef itself changes
+
+
   const handleSend = () => {
     if (message.trim()) {
       onSendMessage(message);
@@ -591,8 +633,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
   return (
     <div style={{ padding: '20px', border: '1px solid green', position: 'relative' }}> {/* Added position: 'relative' */}
-      {/* Score Display */}
-      <div style={{
+      {/* Score Display - THIS WILL BE REPLACED/AUGMENTED BY PointsDisplay */}
+      {/* <div style={{
         position: 'absolute',
         top: '10px',
         left: '10px',
@@ -606,7 +648,12 @@ const GameScreen: React.FC<GameScreenProps> = ({
         zIndex: 100
       }}>
         Score: {score}
-      </div>
+      </div> */}
+
+      <SpeedDisplay speed={displaySpeed} />
+      <PositionDisplay currentPosition={playerPosition} totalRacers={2} />
+      <PointsDisplay points={score} />
+
       <h2>Game Screen</h2>
       <p>My Player ID: {playerId || 'N/A'}</p>
       <p>Connected to Opponent: {opponentId || 'Waiting for opponent...'}</p>
