@@ -1,6 +1,8 @@
 // frontend/src/components/GameScreen.tsx
-import React, { useState, useEffect, useRef } from 'react'; // Added useEffect and useRef
+import React, { useState, useEffect, useRef } from 'react';
 import { Engine, Render, Runner, World, Bodies, Composite, Constraint, Body, Events } from 'matter-js';
+import { GameState } from '../types/GameState'; // Import GameState
+import webRTCService from '../services/WebRTCService'; // Import webRTCService
 
 interface GameScreenProps {
   opponentId: string | null;
@@ -78,7 +80,10 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const sceneRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const runnerRef = useRef<Runner | null>(null);
-  const bicycleRef = useRef<Composite | null>(null); // Ref to store the bicycle composite
+  const bicycleRef = useRef<Composite | null>(null); // Ref to store the player's bicycle composite
+  const opponentBicycleRef = useRef<Composite | null>(null); // Ref to store the opponent's bicycle composite
+  const opponentStateBufferRef = useRef<Array<{ state: GameState, receivedTime: number }>>([]);
+  const opponentVisualStateRef = useRef<{ position: { x: number, y: number }, angle: number, wheelSpeed: number } | null>(null);
   const lastAPressTimeRef = useRef<number>(0);
   const lastDPressTimeRef = useRef<number>(0);
   const targetForceRef = useRef<number>(0);
@@ -122,22 +127,44 @@ const GameScreen: React.FC<GameScreenProps> = ({
     const ground = Bodies.rectangle(400, 590, 810, 60, { isStatic: true, label: 'ground' }); // Ground
     World.add(world, [ground]);
 
-    // Create and add the bicycle
-    const bicycleInstance = createBicycle(400, 100); // Positioned above ground
-    bicycleRef.current = bicycleInstance; // Store instance in ref
-    World.add(world, bicycleInstance);
+    // Create and add the player's bicycle
+    const playerBicycleInstance = createBicycle(400, 100); // Player's starting position
+    bicycleRef.current = playerBicycleInstance;
+    World.add(world, playerBicycleInstance);
+
+    // Create and add the opponent's bicycle
+    const opponentBicycleInstance = createBicycle(100, 100); // Opponent's starting position
+    opponentBicycleRef.current = opponentBicycleInstance;
+    // Optionally, change color or properties for visual distinction
+    opponentBicycleInstance.bodies.forEach(b => {
+      if (b.label === 'frame' || b.label === 'wheelA' || b.label === 'wheelB') {
+        b.render.fillStyle = 'rgba(0, 0, 255, 0.7)'; // Example: Make opponent's bike semi-transparent blue
+        b.render.strokeStyle = 'darkblue';
+      }
+    });
+    World.add(world, opponentBicycleInstance);
+
+    // Set opponent's bicycle parts to be sensors
+    const opponentFrameBody = Composite.get(opponentBicycleInstance, 'frame', 'body') as Body | null;
+    const opponentWheelABody = Composite.get(opponentBicycleInstance, 'wheelA', 'body') as Body | null;
+    const opponentWheelBBody = Composite.get(opponentBicycleInstance, 'wheelB', 'body') as Body | null;
+
+    if (opponentFrameBody) Body.set(opponentFrameBody, { isSensor: true });
+    if (opponentWheelABody) Body.set(opponentWheelABody, { isSensor: true });
+    if (opponentWheelBBody) Body.set(opponentWheelBBody, { isSensor: true });
 
 
     // Run the engine
     Runner.run(runner, engine);
     Render.run(render);
 
-    // --- beforeUpdate event listener ---
-    const handleBeforeUpdate = () => {
+    const RENDER_DELAY = 100; // ms, for interpolation
+
+    // --- Main game loop listener (beforeUpdate) ---
+    const gameLoop = () => {
+      // Player's bicycle force application (existing logic)
       const targetForce = targetForceRef.current;
       const currentAppliedForce = currentAppliedForceRef.current;
-
-      // Smoothly interpolate currentAppliedForce towards targetForce
       const newAppliedForce = currentAppliedForce + (targetForce - currentAppliedForce) * FORCE_SMOOTHING_FACTOR;
       currentAppliedForceRef.current = newAppliedForce;
 
@@ -147,20 +174,116 @@ const GameScreen: React.FC<GameScreenProps> = ({
           Body.applyForce(rearWheel, rearWheel.position, { x: newAppliedForce, y: 0 });
         }
       }
-
-      // Decay the target force if no new input
       targetForceRef.current *= TARGET_FORCE_DECAY_FACTOR;
       if (Math.abs(targetForceRef.current) < MIN_APPLIED_FORCE_THRESHOLD) {
-        targetForceRef.current = 0; // Snap to zero if very small
+        targetForceRef.current = 0;
+      }
+
+      // Opponent's bicycle interpolation logic
+      if (opponentBicycleRef.current && engineRef.current) {
+        const buffer = opponentStateBufferRef.current;
+        const renderTimestamp = performance.now(); // Using performance.now() for consistency with receivedTime
+
+        if (buffer.length === 0 && opponentVisualStateRef.current) {
+          // If buffer is empty but we had a visual state, keep rendering that (no new updates)
+          // This case might be redundant if visual state is only set when buffer has items.
+        } else if (buffer.length > 0) {
+          let s1 = null, s2 = null;
+
+          // Find two states to interpolate between based on RENDER_DELAY
+          const targetTime = renderTimestamp - RENDER_DELAY;
+          for (let i = buffer.length - 1; i >= 0; i--) {
+            if (buffer[i].state.timestamp <= targetTime) {
+              s1 = buffer[i];
+              if (i + 1 < buffer.length) {
+                s2 = buffer[i + 1];
+              }
+              break;
+            }
+          }
+          // If no state is old enough, s1 will be null. We might need to extrapolate backwards or use the oldest state.
+          // If all states are older than targetTime (s1 is the latest, s2 is null), we extrapolate forwards.
+
+          if (s1 && s2) { // Interpolate
+            const t1 = s1.state.timestamp;
+            const t2 = s2.state.timestamp;
+            let factor = 0;
+            if (t2 - t1 > 0) { // Avoid division by zero
+                factor = (targetTime - t1) / (t2 - t1);
+            }
+            factor = Math.max(0, Math.min(1, factor)); // Clamp factor
+
+            const prevPos = s1.state.position;
+            const nextPos = s2.state.position;
+            const interpolatedX = prevPos.x + (nextPos.x - prevPos.x) * factor;
+            const interpolatedY = prevPos.y + (nextPos.y - prevPos.y) * factor;
+
+            const prevAngle = s1.state.angle;
+            const nextAngle = s2.state.angle;
+            // Simple linear interpolation for angle. Consider shortest path for angles if differences can be large.
+            const interpolatedAngle = prevAngle + (nextAngle - prevAngle) * factor;
+
+            opponentVisualStateRef.current = {
+              position: { x: interpolatedX, y: interpolatedY },
+              angle: interpolatedAngle,
+              wheelSpeed: s2.state.wheelSpeed, // Use latest wheel speed
+            };
+          } else if (s1) { // Extrapolate from s1 (if s2 is null, means s1 is the newest state older than targetTime)
+                           // Or, if all states are newer than targetTime, s1 is null.
+                           // For now, if only one state or cannot find pair, just use the latest.
+            const latestStateEntry = buffer[buffer.length - 1];
+            opponentVisualStateRef.current = {
+              position: { ...latestStateEntry.state.position },
+              angle: latestStateEntry.state.angle,
+              wheelSpeed: latestStateEntry.state.wheelSpeed,
+            };
+          } else if (buffer.length > 0) { // Fallback: use the most recent state if no suitable pair found
+            const latestStateEntry = buffer[buffer.length - 1];
+            opponentVisualStateRef.current = {
+              position: { ...latestStateEntry.state.position },
+              angle: latestStateEntry.state.angle,
+              wheelSpeed: latestStateEntry.state.wheelSpeed,
+            };
+          }
+        }
+
+        // Apply visual state to Matter.js bodies
+        if (opponentVisualStateRef.current && opponentBicycleRef.current) {
+          const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
+          const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
+          if (opponentFrame && opponentRearWheel) {
+            Body.setPosition(opponentFrame, opponentVisualStateRef.current.position);
+            Body.setAngle(opponentFrame, opponentVisualStateRef.current.angle);
+            Body.setAngularVelocity(opponentRearWheel, opponentVisualStateRef.current.wheelSpeed);
+          }
+        }
       }
     };
+    Events.on(engine, 'beforeUpdate', gameLoop); // Use beforeUpdate for physics related changes
 
-    Events.on(engine, 'beforeUpdate', handleBeforeUpdate);
-    // --- End of beforeUpdate event listener ---
+    // --- afterUpdate event listener for sending game state (player's state) ---
+    const handlePlayerStateSend = () => {
+      if (bicycleRef.current && engineRef.current) {
+        const frame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
+        const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+
+        if (frame && rearWheel) {
+          const gameState: GameState = {
+            position: { x: frame.position.x, y: frame.position.y },
+            angle: frame.angle,
+            wheelSpeed: rearWheel.angularVelocity,
+            timestamp: performance.now(), // Use performance.now() for player state as well
+          };
+          webRTCService.sendGameState(gameState);
+        }
+      }
+    };
+    Events.on(engine, 'afterUpdate', handlePlayerStateSend); // Send state after physics update
 
     // Cleanup on unmount
     return () => {
-      Events.off(engine, 'beforeUpdate', handleBeforeUpdate); // Remove event listener
+      Events.off(engine, 'beforeUpdate', gameLoop);
+      Events.off(engine, 'afterUpdate', handlePlayerStateSend);
 
       if (runnerRef.current) {
         Runner.stop(runnerRef.current);
@@ -175,6 +298,45 @@ const GameScreen: React.FC<GameScreenProps> = ({
       }
     };
   }, []); // Empty dependency array ensures this runs only once on mount and cleanup on unmount
+  // Note: bicycleRef, opponentBicycleRef and engineRef are refs, their .current property changes do not trigger re-runs of useEffect.
+  // If these refs themselves were to change (which they don't in this setup), they'd be needed in dependencies.
+
+  // Effect for setting up game state receiver
+  useEffect(() => {
+    const BUFFER_SIZE_LIMIT = 20; // Keep last 20 states
+
+    webRTCService.setOnGameStateReceived((gameState: GameState) => {
+      const receivedTime = performance.now(); // Use performance.now() for consistency
+      opponentStateBufferRef.current.push({ state: gameState, receivedTime });
+
+      // Manage buffer size
+      if (opponentStateBufferRef.current.length > BUFFER_SIZE_LIMIT) {
+        opponentStateBufferRef.current.shift(); // Remove the oldest state
+      }
+
+      // If this is the first state, or opponentVisualState is not yet set,
+      // initialize visual state and apply directly to Matter bodies.
+      if (!opponentVisualStateRef.current && opponentBicycleRef.current) {
+        opponentVisualStateRef.current = {
+          position: { ...gameState.position },
+          angle: gameState.angle,
+          wheelSpeed: gameState.wheelSpeed,
+        };
+
+        const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
+        const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
+        if (opponentFrame && opponentRearWheel) {
+          Body.setPosition(opponentFrame, gameState.position);
+          Body.setAngle(opponentFrame, gameState.angle);
+          Body.setAngularVelocity(opponentRearWheel, gameState.wheelSpeed);
+        }
+      }
+    });
+
+    return () => {
+      webRTCService.setOnGameStateReceived(null); // Clear callback on unmount
+    };
+  }, []); // Empty dependency array, runs once on mount
 
   // Effect for keyboard input
   useEffect(() => {
