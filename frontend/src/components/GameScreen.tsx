@@ -88,6 +88,8 @@ const GameScreen: React.FC<GameScreenProps> = ({
   const lastDPressTimeRef = useRef<number>(0);
   const targetForceRef = useRef<number>(0);
   const currentAppliedForceRef = useRef<number>(0);
+  const lastPotholeCollisionTimeRef = useRef<number>(0); // For pothole effect cooldown
+  const lastOilSlickCollisionTimeRef = useRef<number>(0); // For oil slick effect cooldown
 
   // Constants for physics behavior
   const FORCE_SMOOTHING_FACTOR = 0.1;
@@ -124,16 +126,168 @@ const GameScreen: React.FC<GameScreenProps> = ({
     runnerRef.current = runner;
 
     // Add bodies
-    const ground = Bodies.rectangle(400, 590, 810, 60, { isStatic: true, label: 'ground' }); // Ground
-    World.add(world, [ground]);
+    // const ground = Bodies.rectangle(400, 590, 810, 60, { isStatic: true, label: 'ground' }); // Ground
+    // World.add(world, [ground]); // Ground removed for track
+
+    // Track dimensions and properties
+    const canvasWidth = 800;
+    const canvasHeight = 600;
+    const trackOuterWidth = 700;
+    const trackOuterHeight = 450;
+    const trackInnerWidth = 500;
+    const trackInnerHeight = 250;
+    const wallThickness = 20;
+    // const cornerRadius = 100; // Conceptual
+
+    const trackCenterX = canvasWidth / 2;
+    const trackCenterY = canvasHeight / 2;
+
+    const trackWallStyle = { isStatic: true, label: 'trackWall', render: { fillStyle: '#666' } };
+
+    const wallBodies = [];
+
+    // Outer walls
+    // Top outer wall
+    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY - trackOuterHeight / 2 + wallThickness / 2, trackOuterWidth - 2 * 100, wallThickness, trackWallStyle)); // Shortened for corners
+    // Bottom outer wall
+    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY + trackOuterHeight / 2 - wallThickness / 2, trackOuterWidth - 2 * 100, wallThickness, trackWallStyle)); // Shortened for corners
+    // Left outer wall
+    wallBodies.push(Bodies.rectangle(trackCenterX - trackOuterWidth / 2 + wallThickness / 2, trackCenterY, wallThickness, trackOuterHeight - 2 * 100, trackWallStyle)); // Shortened for corners
+    // Right outer wall
+    wallBodies.push(Bodies.rectangle(trackCenterX + trackOuterWidth / 2 - wallThickness / 2, trackCenterY, wallThickness, trackOuterHeight - 2 * 100, trackWallStyle)); // Shortened for corners
+
+    // Inner walls
+    // Top inner wall
+    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY - trackInnerHeight / 2 + wallThickness / 2, trackInnerWidth - 2 * 50, wallThickness, trackWallStyle)); // Shortened for corners
+    // Bottom inner wall
+    wallBodies.push(Bodies.rectangle(trackCenterX, trackCenterY + trackInnerHeight / 2 - wallThickness / 2, trackInnerWidth - 2 * 50, wallThickness, trackWallStyle)); // Shortened for corners
+    // Left inner wall
+    wallBodies.push(Bodies.rectangle(trackCenterX - trackInnerWidth / 2 + wallThickness / 2, trackCenterY, wallThickness, trackInnerHeight - 2 * 50, trackWallStyle)); // Shortened for corners
+    // Right inner wall
+    wallBodies.push(Bodies.rectangle(trackCenterX + trackInnerWidth / 2 - wallThickness / 2, trackCenterY, wallThickness, trackInnerHeight - 2 * 50, trackWallStyle)); // Shortened for corners
+
+    // Approximate corners with small rectangles
+    const cornerSegments = 6;
+    const segmentAngle = Math.PI / 2 / cornerSegments;
+    const outerCornerRadius = (trackOuterHeight - trackInnerHeight) / 4; // Approximate
+    const innerCornerRadius = outerCornerRadius;
+
+
+    // Outer corners
+    // Top-left outer corner
+    for (let i = 0; i < cornerSegments; i++) {
+      const angle = Math.PI + i * segmentAngle + segmentAngle / 2;
+      const x = trackCenterX - (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2) ;
+      const y = trackCenterY - (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2) ;
+      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+     // Top-right outer corner
+    for (let i = 0; i < cornerSegments; i++) {
+      const angle = Math.PI * 1.5 + i * segmentAngle + segmentAngle / 2;
+      const x = trackCenterX + (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2);
+      const y = trackCenterY - (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2);
+      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+    // Bottom-left outer corner
+    for (let i = 0; i < cornerSegments; i++) {
+      const angle = Math.PI * 0.5 + i * segmentAngle + segmentAngle / 2;
+      const x = trackCenterX - (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2);
+      const y = trackCenterY + (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2);
+      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+    // Bottom-right outer corner
+    for (let i = 0; i < cornerSegments; i++) {
+      const angle = 0 + i * segmentAngle + segmentAngle / 2;
+      const x = trackCenterX + (trackOuterWidth / 2 - 100) + Math.cos(angle) * (100 - wallThickness/2);
+      const y = trackCenterY + (trackOuterHeight / 2 - 100) + Math.sin(angle) * (100 - wallThickness/2);
+      wallBodies.push(Bodies.rectangle(x, y, 50, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+
+    // Inner corners (similar logic, adjusted radii and positions)
+    // Top-left inner corner
+    for (let i = 0; i < cornerSegments; i++) {
+        const angle = Math.PI + i * segmentAngle + segmentAngle / 2;
+        const x = trackCenterX - (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
+        const y = trackCenterY - (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
+        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+    // Top-right inner corner
+    for (let i = 0; i < cornerSegments; i++) {
+        const angle = Math.PI * 1.5 + i * segmentAngle + segmentAngle / 2;
+        const x = trackCenterX + (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
+        const y = trackCenterY - (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
+        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+    // Bottom-left inner corner
+    for (let i = 0; i < cornerSegments; i++) {
+        const angle = Math.PI * 0.5 + i * segmentAngle + segmentAngle / 2;
+        const x = trackCenterX - (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
+        const y = trackCenterY + (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
+        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+    // Bottom-right inner corner
+    for (let i = 0; i < cornerSegments; i++) {
+        const angle = 0 + i * segmentAngle + segmentAngle / 2;
+        const x = trackCenterX + (trackInnerWidth / 2 - 50) + Math.cos(angle) * (50 - wallThickness/2);
+        const y = trackCenterY + (trackInnerHeight / 2 - 50) + Math.sin(angle) * (50 - wallThickness/2);
+        wallBodies.push(Bodies.rectangle(x, y, 40, wallThickness, { ...trackWallStyle, angle: angle + Math.PI/2 }));
+    }
+
+
+    World.add(world, wallBodies);
+
+    // Hazard Properties
+    const potholeRadius = 18;
+    const potholeStyle = { isStatic: true, isSensor: true, label: 'pothole', render: { fillStyle: '#8B4513' } };
+    const oilSlickWidth = 30; // Adjusted to be width when rotated to be across track path
+    const oilSlickHeight = 80; // Adjusted to be length along track path
+    const oilSlickStyle = { isStatic: true, isSensor: true, label: 'oilSlick', render: { fillStyle: '#4A4A4A' } };
+
+    // Hazard Placement Calculations
+    // Pothole 1 (Top straight, slightly right)
+    const p1x = trackCenterX + 50;
+    const p1y = trackCenterY - (trackInnerHeight / 2) - ((trackOuterHeight - trackInnerHeight) / 4);
+
+    // Pothole 2 (Bottom straight, slightly left)
+    const p2x = trackCenterX - 50;
+    const p2y = trackCenterY + (trackInnerHeight / 2) + ((trackOuterHeight - trackInnerHeight) / 4);
+
+    // Oil Slick 1 (Left side, on the straight part of the track width)
+    const o1x = trackCenterX - (trackInnerWidth / 2) - ((trackOuterWidth - trackInnerWidth) / 4);
+    const o1y = trackCenterY - 50; // Adjusted to be on the track, may need further fine-tuning
+
+    // Oil Slick 2 (Right side, on the straight part of the track width)
+    const o2x = trackCenterX + (trackInnerWidth / 2) + ((trackOuterWidth - trackInnerWidth) / 4);
+    const o2y = trackCenterY + 50; // Adjusted to be on the track, may need further fine-tuning
+
+    // Create Hazard Bodies
+    const pothole1 = Bodies.circle(p1x, p1y, potholeRadius, potholeStyle);
+    const pothole2 = Bodies.circle(p2x, p2y, potholeRadius, potholeStyle);
+    // For oil slicks, the 'width' becomes height and 'height' becomes width due to rotation.
+    // Or, define width as across track and height as along track, then rotate.
+    // Let's define width: 80 (along track), height: 30 (across track), then rotate.
+    // The task description implies width 80, height 30. If rotated PI/2, width becomes vertical.
+    // So, width = 30 (across track), height = 80 (along track) if not rotating.
+    // Or, width = 80 (original width), height = 30 (original height), angle = PI/2
+    const oilSlick1 = Bodies.rectangle(o1x, o1y, 80, 30, { ...oilSlickStyle, angle: Math.PI / 2 });
+    const oilSlick2 = Bodies.rectangle(o2x, o2y, 80, 30, { ...oilSlickStyle, angle: Math.PI / 2 }); // Or -Math.PI/2, effect is same for 180deg symmetry
+
+    World.add(world, [pothole1, pothole2, oilSlick1, oilSlick2]);
 
     // Create and add the player's bicycle
-    const playerBicycleInstance = createBicycle(400, 100); // Player's starting position
+    // Adjusted Y position: (canvasHeight - trackOuterHeight / 2) - 50 (on top straight part, above its centerline)
+    // = (600 - 450/2) - 50 = (600 - 225) - 50 = 375 - 50 = 325
+    const playerStartX = trackCenterX;
+    const playerStartY = trackCenterY - trackOuterHeight / 2 + wallThickness + 50; // Position on the top straight track
+    const playerBicycleInstance = createBicycle(playerStartX, playerStartY);
     bicycleRef.current = playerBicycleInstance;
     World.add(world, playerBicycleInstance);
 
     // Create and add the opponent's bicycle
-    const opponentBicycleInstance = createBicycle(100, 100); // Opponent's starting position
+    // Place opponent on a different part of the track, e.g., bottom straight
+    const opponentStartX = trackCenterX;
+    const opponentStartY = trackCenterY + trackOuterHeight / 2 - wallThickness - 50; // Position on the bottom straight track
+    const opponentBicycleInstance = createBicycle(opponentStartX, opponentStartY);
     opponentBicycleRef.current = opponentBicycleInstance;
     // Optionally, change color or properties for visual distinction
     opponentBicycleInstance.bodies.forEach(b => {
@@ -158,10 +312,83 @@ const GameScreen: React.FC<GameScreenProps> = ({
     Runner.run(runner, engine);
     Render.run(render);
 
+    // --- Collision Detection with Hazards ---
+    const handleCollision = (event: Matter.IEventCollision<Engine>) => {
+      if (!bicycleRef.current) return;
+
+      const playerParts = Composite.allBodies(bicycleRef.current);
+      const pairs = event.pairs;
+
+      for (let i = 0; i < pairs.length; i++) {
+        const pair = pairs[i];
+        let playerBody = null;
+        let hazardBody = null;
+
+        const isBodyAPlayerPart = playerParts.some(part => part.id === pair.bodyA.id);
+        const isBodyBPlayerPart = playerParts.some(part => part.id === pair.bodyB.id);
+
+        if (isBodyAPlayerPart && (pair.bodyB.label === 'pothole' || pair.bodyB.label === 'oilSlick')) {
+          playerBody = pair.bodyA;
+          hazardBody = pair.bodyB;
+        } else if (isBodyBPlayerPart && (pair.bodyA.label === 'pothole' || pair.bodyA.label === 'oilSlick')) {
+          playerBody = pair.bodyB;
+          hazardBody = pair.bodyA;
+        }
+
+        if (playerBody && hazardBody) {
+          // console.log(`Player collided with: ${hazardBody.label}`); // Original log
+
+          if (hazardBody.label === 'pothole') {
+            const now = Date.now();
+            const POTHOLE_COOLDOWN = 1000; // 1 second cooldown
+            if (now - lastPotholeCollisionTimeRef.current > POTHOLE_COOLDOWN) {
+              console.log('Applying pothole effect...');
+              lastPotholeCollisionTimeRef.current = now;
+
+              const playerBicycleParts = Composite.allBodies(bicycleRef.current!); // bicycleRef.current is checked at the start of handleCollision
+              playerBicycleParts.forEach(part => {
+                Body.setVelocity(part, {
+                  x: part.velocity.x * 0.5, // Reduce horizontal speed by 50%
+                  y: part.velocity.y * 0.5  // Reduce vertical speed by 50%
+                });
+              });
+
+              const rearWheel = Composite.get(bicycleRef.current!, 'wheelB', 'body') as Body | null;
+              const frontWheel = Composite.get(bicycleRef.current!, 'wheelA', 'body') as Body | null;
+              if (rearWheel) Body.setAngularVelocity(rearWheel, rearWheel.angularVelocity * 0.5);
+              if (frontWheel) Body.setAngularVelocity(frontWheel, frontWheel.angularVelocity * 0.5);
+            }
+          } else if (hazardBody.label === 'oilSlick') {
+            const now = Date.now();
+            const OIL_SLICK_COOLDOWN = 1500; // 1.5 seconds cooldown
+            if (now - lastOilSlickCollisionTimeRef.current > OIL_SLICK_COOLDOWN) {
+              console.log('Applying oil slick effect...');
+              lastOilSlickCollisionTimeRef.current = now;
+
+              const playerFrame = Composite.get(bicycleRef.current!, 'frame', 'body') as Body | null;
+              // The frame density is 0.005. A force of 0.05 would be huge.
+              // Let's try a force relative to its likely mass.
+              // If frame is 100x30 area, volume (if thickness 1) is 3000. Mass ~ 3000 * 0.005 = 15.
+              // A force of 0.05 / 15 is an acceleration of ~0.0033 m/s^2 (if units are SI like)
+              // Let's use a smaller force magnitude, e.g., 0.0025, if this is too small it can be tuned.
+              const forceMagnitude = 0.0025;
+              const direction = Math.random() < 0.5 ? -1 : 1; // Randomly swerve left or right
+
+              if (playerFrame) {
+                Body.applyForce(playerFrame, playerFrame.position, { x: forceMagnitude * direction, y: 0 });
+              }
+            }
+          }
+        }
+      }
+    };
+
+    Events.on(engine, 'collisionStart', handleCollision);
+
     const RENDER_DELAY = 100; // ms, for interpolation
 
     // --- Main game loop listener (beforeUpdate) ---
-    const gameLoop = () => {
+    const gameLoop = () => { // Renamed from gameLoop to avoid conflict if any, though it's local
       // Player's bicycle force application (existing logic)
       const targetForce = targetForceRef.current;
       const currentAppliedForce = currentAppliedForceRef.current;
@@ -261,8 +488,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
     };
     Events.on(engine, 'beforeUpdate', gameLoop); // Use beforeUpdate for physics related changes
 
+
     // --- afterUpdate event listener for sending game state (player's state) ---
-    const handlePlayerStateSend = () => {
+    const handlePlayerStateSend = () => { // Renamed from handlePlayerStateSend to avoid conflict if any
       if (bicycleRef.current && engineRef.current) {
         const frame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
         const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
@@ -282,6 +510,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
     // Cleanup on unmount
     return () => {
+      Events.off(engine, 'collisionStart', handleCollision); // Cleanup collision listener
       Events.off(engine, 'beforeUpdate', gameLoop);
       Events.off(engine, 'afterUpdate', handlePlayerStateSend);
 
@@ -289,13 +518,16 @@ const GameScreen: React.FC<GameScreenProps> = ({
         Runner.stop(runnerRef.current);
       }
       if (engineRef.current) {
-        Composite.clear(engineRef.current.world, false, true);
-        Engine.clear(engineRef.current);
+        Composite.clear(engineRef.current.world, false, true); // Clear bodies, constraints, composites
+        Engine.clear(engineRef.current); // Clear the engine itself
       }
-      Render.stop(render);
+      Render.stop(render); // Stop the renderer
       if (render.canvas) {
-        render.canvas.remove();
+        render.canvas.remove(); // Remove the canvas element
       }
+      // Ensure runner and engine are nullified if needed, though refs will persist
+      // runnerRef.current = null;
+      // engineRef.current = null;
     };
   }, []); // Empty dependency array ensures this runs only once on mount and cleanup on unmount
   // Note: bicycleRef, opponentBicycleRef and engineRef are refs, their .current property changes do not trigger re-runs of useEffect.
