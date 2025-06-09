@@ -80,11 +80,11 @@ export const createBicycle = (x: number, y: number, playerType: 'player1' | 'pla
   });
 
   const bicycleComposite = Composite.create({ label: 'Bicycle' }); // Create a composite to group all bicycle parts
-  Composite.addBody(bicycleComposite, wheelA);
-  Composite.addBody(bicycleComposite, wheelB);
-  Composite.addBody(bicycleComposite, frame);
-  Composite.addConstraint(bicycleComposite, axleA);
-  Composite.addConstraint(bicycleComposite, axleB);
+  Composite.add(bicycleComposite, wheelA);
+  Composite.add(bicycleComposite, wheelB);
+  Composite.add(bicycleComposite, frame);
+  Composite.add(bicycleComposite, axleA);
+  Composite.add(bicycleComposite, axleB);
 
   return bicycleComposite;
 };

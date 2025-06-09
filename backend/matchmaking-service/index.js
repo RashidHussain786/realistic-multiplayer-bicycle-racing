@@ -41,7 +41,6 @@ exports.handler = async (event) => {
         if (action === 'sendSignal') {
             const { sourcePlayerId, targetPlayerId, signalPayload } = body;
 
-            const { sourcePlayerId, targetPlayerId, signalPayload } = body;
             let missingFields = [];
             if (!sourcePlayerId) missingFields.push('sourcePlayerId');
             if (!targetPlayerId) missingFields.push('targetPlayerId');

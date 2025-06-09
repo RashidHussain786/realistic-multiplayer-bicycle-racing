@@ -104,18 +104,14 @@ const useMatterJS = ({
 
     if (engine && renderInstance && runnerInstance) {
       if (isRunning) {
-        // Check if already running to avoid redundant console logs, though Matter.js handles multiple runs.
-        // This is more for cleaner logging than strict necessity.
-        if (!renderInstance.options.enabled || (runnerInstance && !runnerInstance.enabled)) {
-            console.log("useMatterJS: Starting/Resuming Render and Runner due to isRunning change.");
-        }
+        // The console.log regarding state change can be simplified or made more generic
+        // as Render.run and Runner.run handle their own state.
+        // For example, a simple log before calling run:
+        console.log("useMatterJS: Ensuring Render and Runner are active as isRunning is true.");
         Render.run(renderInstance);
         Runner.run(runnerInstance, engine);
       } else {
-        // Similar check for stopping
-        if (renderInstance.options.enabled || (runnerInstance && runnerInstance.enabled)) {
-            console.log("useMatterJS: Stopping Render and Runner due to isRunning change.");
-        }
+        console.log("useMatterJS: Ensuring Render and Runner are stopped as isRunning is false.");
         Render.stop(renderInstance);
         Runner.stop(runnerInstance);
       }

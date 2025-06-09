@@ -1,14 +1,15 @@
 // frontend/src/components/MainMenu.tsx
 import React, { useState, useEffect } from 'react';
 import webRTCService from '../services/WebRTCService';
-import type SimplePeer from 'simple-peer';
+import * as SimplePeer from 'simple-peer';
 import GameScreen from './GameScreen';
 import MatchmakingScreen from './MatchmakingScreen'; // Added import
 import mainMenuBackground from '../assets/main_menu_background.png';
 import buttonRetroBlue from '../assets/button_retro_blue.png';
 
 // TODO: Replace with your actual AWS API Gateway URL for the matchmaking service
-const API_GATEWAY_URL = 'YOUR_API_GATEWAY_URL_HERE';
+// const API_GATEWAY_URL = 'YOUR_API_GATEWAY_URL_HERE';
+const API_GATEWAY_URL = 'http://localhost:3001'; // Fallback for local development
 const MATCHMAKING_ENDPOINT = `${API_GATEWAY_URL}/matchmaking`;
 // const SIGNALING_ENDPOINT = `${API_GATEWAY_URL}/signal`; // Placeholder for signaling
 
@@ -99,8 +100,8 @@ const MainMenu: React.FC<MainMenuProps> = ({ navigateToMatchmaking }) => {
   // Updated to use navigateToMatchmaking prop
   const handleStartRace = () => {
     if (!playerId) {
-        console.error("Player ID not set yet.");
-        return;
+      console.error("Player ID not set yet.");
+      return;
     }
     // Call the prop function to navigate
     navigateToMatchmaking();
@@ -175,19 +176,19 @@ const MainMenu: React.FC<MainMenuProps> = ({ navigateToMatchmaking }) => {
 
   return (
     <div style={{
-        backgroundImage: `url(${mainMenuBackground})`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        minHeight: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: '20px',
-        fontFamily: "'Press Start 2P', cursive",
-        color: 'white',
-        textAlign: 'center'
-      }}>
+      backgroundImage: `url(${mainMenuBackground})`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      minHeight: '100vh',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '20px',
+      fontFamily: "'Press Start 2P', cursive",
+      color: 'white',
+      textAlign: 'center'
+    }}>
       {rtcError && (
         <p style={{
           backgroundColor: 'rgba(255, 0, 0, 0.7)',

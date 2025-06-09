@@ -1,9 +1,10 @@
-import skyBackground from '../assets/sky_background.png';
+// import skyBackground from '../assets/sky_background.png';
+import skyBackground from '../assets/sky_background.png'
 import mountainLayer1 from '../assets/mountain_layer_1.png';
 import mountainLayer2 from '../assets/mountain_layer_2.png';
 import mountainLayer3 from '../assets/mountain_layer_3.png';
-import retroMusic from '../assets/retro_music.mp3'; // Import the music file
-import coinCollectSound from '../assets/coin_collect.wav'; // Import coin sound effect
+// import retroMusic from '../assets/retro_music.mp3'; // Import the music file
+// import coinCollectSound from '../assets/coin_collect.wav'; // Import coin sound effect
 // frontend/src/components/GameScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import SpeedDisplay from './HUD/SpeedDisplay';
@@ -74,6 +75,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
   onDisconnect,
   onSendMessage,
   lastMessageReceived,
+  onRaceEnd
 }) => {
   // --- Core Game State ---
   const [raceStartTime, setRaceStartTime] = useState<number | null>(null);
@@ -159,7 +161,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
           }
 
           let winnerName = "Player";
-          const playerFrameBody = bicycleRef.current ? Composite.get(bicycleRef.current, 'frame', 'body') as Body | null : null;
+          const playerFrameBody = bicycleRef.current ? Composite.allBodies(bicycleRef.current).find(body => body.label === 'frame') || null : null;
           const playerX = playerFrameBody ? playerFrameBody.position.x : 0;
           const opponentX = opponentVisualStateRef.current?.position?.x || 0;
 
@@ -188,24 +190,24 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
 
   // --- Audio Effects ---
-  useEffect(() => {
-    audioRef.current = new Audio(retroMusic);
-    audioRef.current.loop = true;
-    audioRef.current.volume = volume;
+  // useEffect(() => {
+  //   audioRef.current = new Audio(retroMusic);
+  //   audioRef.current.loop = true;
+  //   audioRef.current.volume = volume;
 
-    const handleAudioError = (e: Event) => {
-      console.error("Error loading audio:", e);
-    };
-    audioRef.current.addEventListener('error', handleAudioError);
+  //   const handleAudioError = (e: Event) => {
+  //     console.error("Error loading audio:", e);
+  //   };
+  //   audioRef.current.addEventListener('error', handleAudioError);
 
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.removeEventListener('error', handleAudioError);
-        audioRef.current = null;
-      }
-    };
-  }, []);
+  //   return () => {
+  //     if (audioRef.current) {
+  //       audioRef.current.pause();
+  //       audioRef.current.removeEventListener('error', handleAudioError);
+  //       audioRef.current = null;
+  //     }
+  //   };
+  // }, []);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -279,9 +281,10 @@ const GameScreen: React.FC<GameScreenProps> = ({
     opponentBicycleRef.current = opponentBicycleInstance;
     World.add(world, opponentBicycleInstance);
 
-    const opponentFrameBody = Composite.get(opponentBicycleInstance, 'frame', 'body') as Body | null;
-    const opponentWheelABody = Composite.get(opponentBicycleInstance, 'wheelA', 'body') as Body | null;
-    const opponentWheelBBody = Composite.get(opponentBicycleInstance, 'wheelB', 'body') as Body | null;
+    const allOpponentBodies = Composite.allBodies(opponentBicycleInstance);
+    const opponentFrameBody = allOpponentBodies.find(body => body.label === 'frame') || null;
+    const opponentWheelABody = allOpponentBodies.find(body => body.label === 'wheelA') || null;
+    const opponentWheelBBody = allOpponentBodies.find(body => body.label === 'wheelB') || null;
 
     if (opponentFrameBody) Body.set(opponentFrameBody, { isSensor: true });
     if (opponentWheelABody) Body.set(opponentWheelABody, { isSensor: true });
@@ -304,9 +307,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
         console.log('Coin collected:', coinBody.id);
         setPlayerCurrency(prevCurrency => prevCurrency + COIN_VALUE);
 
-        const sound = new Audio(coinCollectSound);
-        sound.volume = volume;
-        sound.play().catch(e => console.error("Error playing coin sound:", e));
+        // const sound = new Audio(coinCollectSound);
+        // sound.volume = volume;
+        // sound.play().catch(e => console.error("Error playing coin sound:", e));
 
         // Call removeCoin which is defined in the outer scope of this useEffect
         // Ensure removeCoin is available and correctly defined in the outer scope.
@@ -332,8 +335,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
               y: part.velocity.y * 0.5
             });
           });
-          const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
-          const frontWheel = Composite.get(bicycleRef.current, 'wheelA', 'body') as Body | null;
+          const allPlayerBodiesPothole = Composite.allBodies(bicycleRef.current);
+          const rearWheel = allPlayerBodiesPothole.find(body => body.label === 'wheelB') || null;
+          const frontWheel = allPlayerBodiesPothole.find(body => body.label === 'wheelA') || null;
           if (rearWheel) Body.setAngularVelocity(rearWheel, rearWheel.angularVelocity * 0.5);
           if (frontWheel) Body.setAngularVelocity(frontWheel, frontWheel.angularVelocity * 0.5);
         }
@@ -347,7 +351,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         console.log('Applying oil slick effect...');
         lastOilSlickCollisionTimeRef.current = now;
         if (bicycleRef.current) {
-          const playerFrame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
+          const playerFrame = Composite.allBodies(bicycleRef.current).find(body => body.label === 'frame') || null;
           const forceMagnitude = 0.0025;
           const direction = Math.random() < 0.5 ? -1 : 1;
           if (playerFrame) {
@@ -402,7 +406,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
       const newAppliedForce = currentAppliedForce + (targetForce - currentAppliedForce) * FORCE_SMOOTHING_FACTOR;
       currentAppliedForceRef.current = newAppliedForce;
       if (bicycleRef.current && Math.abs(newAppliedForce) > MIN_APPLIED_FORCE_THRESHOLD) {
-        const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+        const rearWheel = Composite.allBodies(bicycleRef.current).find(body => body.label === 'wheelB') || null;
         if (rearWheel) {
           Body.applyForce(rearWheel, rearWheel.position, { x: newAppliedForce, y: 0 });
         }
@@ -421,8 +425,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
 
         // Apply the visual state to the opponent's bicycle
         if (opponentVisualStateRef.current) { // Check if we have a state to apply
-          const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
-          const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
+          const allOpponentBodiesUpdate = Composite.allBodies(opponentBicycleRef.current);
+          const opponentFrame = allOpponentBodiesUpdate.find(body => body.label === 'frame') || null;
+          const opponentRearWheel = allOpponentBodiesUpdate.find(body => body.label === 'wheelB') || null;
           if (opponentFrame && opponentRearWheel) {
             Body.setPosition(opponentFrame, opponentVisualStateRef.current.position);
             Body.setAngle(opponentFrame, opponentVisualStateRef.current.angle);
@@ -436,8 +441,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
     const handlePlayerStateSend = () => {
       if (raceOver || !bicycleRef.current || !engineRef.current) return;
       if (bicycleRef.current && engineRef.current) {
-        const frame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
-        const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+        const allPlayerBodiesState = Composite.allBodies(bicycleRef.current);
+        const frame = allPlayerBodiesState.find(body => body.label === 'frame') || null;
+        const rearWheel = allPlayerBodiesState.find(body => body.label === 'wheelB') || null;
         if (frame && rearWheel) {
           const gameState: GameState = {
             position: { x: frame.position.x, y: frame.position.y },
@@ -485,8 +491,9 @@ const GameScreen: React.FC<GameScreenProps> = ({
           angle: receivedGameState.angle,
           wheelSpeed: receivedGameState.wheelSpeed,
         };
-        const opponentFrame = Composite.get(opponentBicycleRef.current, 'frame', 'body') as Body | null;
-        const opponentRearWheel = Composite.get(opponentBicycleRef.current, 'wheelB', 'body') as Body | null;
+        const allOpponentBodiesWebRTC = Composite.allBodies(opponentBicycleRef.current);
+        const opponentFrame = allOpponentBodiesWebRTC.find(body => body.label === 'frame') || null;
+        const opponentRearWheel = allOpponentBodiesWebRTC.find(body => body.label === 'wheelB') || null;
         if (opponentFrame && opponentRearWheel) {
           Body.setPosition(opponentFrame, receivedGameState.position);
           Body.setAngle(opponentFrame, receivedGameState.angle);
@@ -507,7 +514,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
     const applyPedalForce = (key: 'a' | 'd') => { // This function could be memoized or defined outside if it doesn't depend on too many props/state
       if (!bicycleRef.current) return;
       const currentTime = Date.now();
-      const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+      const rearWheel = Composite.allBodies(bicycleRef.current).find(body => body.label === 'wheelB') || null;
       if (!rearWheel) {
         console.error('Rear wheel (wheelB) not found in composite');
         return;
@@ -554,7 +561,7 @@ const GameScreen: React.FC<GameScreenProps> = ({
         const MIN_FORCE_FOR_DUST = 0.002; // Threshold to trigger dust
         if (finalForceMagnitude > MIN_FORCE_FOR_DUST) {
           if (bicycleRef.current && engineRef.current && engineRef.current.world) {
-            const rearWheelBody = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
+            const rearWheelBody = Composite.allBodies(bicycleRef.current).find(body => body.label === 'wheelB') || null;
             if (rearWheelBody) {
               createDustPuffSystem(engineRef.current.world, rearWheelBody.position, 3, engineRef.current, raceOver);
             }
@@ -584,34 +591,34 @@ const GameScreen: React.FC<GameScreenProps> = ({
     if (!raceOver && bicycleRef.current) {
       const updateHudData = () => {
         if (raceOver) {
-            if(intervalId) clearInterval(intervalId);
-            return;
+          if (intervalId) clearInterval(intervalId);
+          return;
         }
         if (bicycleRef.current) {
-        const rearWheel = Composite.get(bicycleRef.current, 'wheelB', 'body') as Body | null;
-        if (rearWheel) {
-          const speed = Math.abs(rearWheel.velocity.x);
-          const displayableSpeed = speed * 5;
-          setDisplaySpeed(displayableSpeed);
+          const rearWheel = Composite.allBodies(bicycleRef.current).find(body => body.label === 'wheelB') || null;
+          if (rearWheel) {
+            const speed = Math.abs(rearWheel.velocity.x);
+            const displayableSpeed = speed * 5;
+            setDisplaySpeed(displayableSpeed);
+          }
         }
-      }
 
-      if (bicycleRef.current && opponentVisualStateRef.current?.position) {
-        const playerFrame = Composite.get(bicycleRef.current, 'frame', 'body') as Body | null;
-        if (playerFrame) {
-          const playerX = playerFrame.position.x;
-          const opponentX = opponentVisualStateRef.current.position.x;
-          setPlayerPosition(playerX >= opponentX ? 1 : 2);
+        if (bicycleRef.current && opponentVisualStateRef.current?.position) {
+          const playerFrame = Composite.allBodies(bicycleRef.current).find(body => body.label === 'frame') || null;
+          if (playerFrame) {
+            const playerX = playerFrame.position.x;
+            const opponentX = opponentVisualStateRef.current.position.x;
+            setPlayerPosition(playerX >= opponentX ? 1 : 2);
+          }
         }
-      }
-    };
+      };
       intervalId = window.setInterval(updateHudData, 100);
     } else if (raceOver && intervalId) {
-        clearInterval(intervalId);
+      clearInterval(intervalId);
     }
 
     return () => {
-        if (intervalId) clearInterval(intervalId);
+      if (intervalId) clearInterval(intervalId);
     };
   }, [bicycleRef.current, raceOver]); // opponentVisualStateRef.current could be a dependency if its change should trigger this
 
