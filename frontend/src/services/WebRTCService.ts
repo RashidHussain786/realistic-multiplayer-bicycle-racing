@@ -1,5 +1,5 @@
 // frontend/src/services/WebRTCService.ts
-import * as SimplePeer from 'simple-peer';
+import SimplePeer from 'simple-peer';
 import type { GameState } from '../types/GameState'; // Import GameState
 
 class WebRTCService {
